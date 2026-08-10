@@ -1,0 +1,88 @@
+# Default configuration for the FI-Hyy DALEC2 assimilation.
+#
+# Everything that could reasonably differ between runs lives here. Nothing in
+# src/dalec hard-codes a path, a year, a seed or a parameter name.
+#
+# Paths are relative to the repository root unless absolute.
+
+# --- Provenance --------------------------------------------------------------
+# A single master seed. Every stochastic step (Morris sampling, synthetic-twin
+# noise, NUTS chains) derives its seed from this one and records it in the
+# output, so a run is reproducible from the config alone.
+seed: 20260809
+
+# --- Site --------------------------------------------------------------------
+site:
+  code: FI-Hyy
+  name: Hyytiala
+  # Evergreen needleleaf forest (Scots pine). Being evergreen is the ecological
+  # ground for fixing the five phenology parameters in Phase 4.
+  igbp: ENF
+  latitude_deg: 61.8474    # needed by the ACM day-length term (Phase 3)
+  longitude_deg: 24.2948
+
+# --- Paths -------------------------------------------------------------------
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  results_dir: results
+  # FLUXNET2015 FULLSET daily file. FULLSET, not SUBSET: SUBSET omits
+  # NEE_VUT_REF_RANDUNC, which is the standard deviation of the likelihood.
+  fluxnet_file: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-3.csv
+  processed_file: data/processed/fi_hyy_dalec_inputs.nc
+
+# --- Data screening ----------------------------------------------------------
+data:
+  # NEE_VUT_REF_QC at daily resolution is the fraction of the day that is
+  # measured or good-quality gap-filled. Days below this threshold are masked
+  # out of the likelihood; they are NOT dropped from the time series, because
+  # the forward model has to integrate continuously through them.
+  qc_threshold: 0.75
+
+# --- Calibration / evaluation design -----------------------------------------
+# A contiguous calibration block followed by a forward run over a contiguous
+# held-out block (Richardson et al. 2010). Both are inclusive year ranges.
+#
+# TO BE FILLED from the Phase 1 coverage table (scripts/00_qc_coverage.py).
+# Left null deliberately -- the scripts raise rather than silently defaulting.
+years:
+  calibration: null   # e.g. [2000, 2006]
+  evaluation: null    # e.g. [2007, 2011]
+
+# --- Fixed parameters --------------------------------------------------------
+# Parameters held at a constant value instead of being sampled. Populated in
+# Phase 4 (the five phenology parameters, on evergreen grounds) and extended in
+# Phase 5 from the Morris screening. Keys must match names in the
+# dalec.parameters registry.
+fixed_parameters: {}
+
+# --- Morris screening (Phase 5) ----------------------------------------------
+morris:
+  trajectories: 200
+  num_levels: 4
+  # Screening runs the NumPy forward model over this block. Defaults to the
+  # calibration block when null.
+  years: null
+
+# --- Sampler (Phase 6 onwards) -----------------------------------------------
+# NUTS only. No alternative samplers, by design.
+sampler:
+  draws: 1000
+  tune: 1000
+  chains: 4
+  cores: 4
+  target_accept: 0.9
+  max_treedepth: 10
+
+# --- Synthetic twin (Phase 7) ------------------------------------------------
+synthetic:
+  # Noise is drawn with the per-day sd taken from the real RANDUNC series, so
+  # the twin inherits the real observation-error structure.
+  years: null   # defaults to the calibration block when null
+
+# --- Diagnostics (Phase 8) ---------------------------------------------------
+diagnostics:
+  rhat_threshold: 1.1
+  hdi_prob: 0.94
+  figure_format: pdf
+  figure_dpi: 300

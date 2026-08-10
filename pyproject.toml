@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dalec-fi-hyy"
+version = "0.1.0"
+description = "Bayesian data assimilation of DALEC2 forest carbon dynamics against FI-Hyy eddy-covariance NEE"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.13",           # brentq, for the phenology psi root (Bloom & Williams A9)
+    "pandas>=2.1",
+    "xarray>=2024.1.0",
+    "netCDF4>=1.6",         # xarray/ArviZ NetCDF engine -- sampler output is NetCDF, never pickle
+    "pymc>=5.16",
+    "pytensor>=2.25",       # pulled in by pymc, pinned here because model.py imports it directly
+    "arviz>=0.18",
+    "matplotlib>=3.8",
+    "SALib>=1.5",           # Morris screening (Phase 5)
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dalec = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "NPY", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["dalec"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+
+# The scientific stack ships either no stubs or stubs that are looser than the
+# runtime behaviour we rely on. Type-check our own code, not theirs.
+[[tool.mypy.overrides]]
+module = [
+    "pandas.*", "xarray.*", "yaml", "scipy.*",
+    "pymc.*", "pytensor.*", "arviz.*", "SALib.*",
+]
+ignore_missing_imports = true
