@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from conftest import SyntheticFluxnet, make_parameters
@@ -15,6 +16,7 @@ from dalec.diagnostics import (
     canopy_efficiency_sweep,
     format_gpp_magnitude_report,
     gpp_magnitude_gate,
+    temperature_proxy_comparison,
 )
 from dalec.model_numpy import run_dalec2
 
@@ -292,6 +294,77 @@ def test_gate_rejects_a_meaningless_lai_band(block: SiteData) -> None:
         gpp_magnitude_gate(
             make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED), lai_band=(8.0, 1.0)
         )
+
+
+# ---------------------------------------------------------------------------
+# Temperature proxy comparison
+# ---------------------------------------------------------------------------
+
+
+def _extremes_for(
+    block: SiteData, *, spread: float = 4.0, vary: bool = True
+) -> pd.DataFrame:
+    """True daily extremes, as 01b_derive_tminmax.py would write them.
+
+    The spread varies through the year by default: a constant range is
+    degenerate, and correlation against it is undefined.
+    """
+    mean = 0.5 * (block.t_day + block.t_night)
+    half = spread + (np.sin(2.0 * np.pi * block.doy / 365.25) if vary else 0.0)
+    return pd.DataFrame(
+        {
+            "t_max": mean + half,
+            "t_min": mean - half,
+            "t_range": 2.0 * half,
+            "n_halfhours": np.full(block.n_days, 48),
+            "reliable": np.full(block.n_days, True),
+        },
+        index=pd.DatetimeIndex(block.time).normalize(),
+    )
+
+
+def test_proxy_comparison_reports_every_quantity(block: SiteData) -> None:
+    table = temperature_proxy_comparison(block, _extremes_for(block))
+
+    assert list(table.index) == ["t_max vs TA_F_DAY", "t_min vs TA_F_NIGHT", "t_range"]
+    assert (table["n_days"] == block.n_days).all()
+    for column in ("correlation", "mean_bias", "rmse"):
+        assert np.isfinite(table[column]).all(), column
+
+
+def test_proxy_comparison_measures_the_range_understatement(block: SiteData) -> None:
+    """The whole point: the proxy range is not the true range."""
+    extremes = _extremes_for(block, spread=4.0, vary=False)  # true range 8.0 flat
+    table = temperature_proxy_comparison(block, extremes)
+
+    proxy_range = float((block.t_day - block.t_night).mean())
+    assert table.loc["t_range", "mean_bias"] == pytest.approx(proxy_range - 8.0)
+    assert table.loc["t_range", "truth_min"] == pytest.approx(8.0)
+
+
+def test_correlation_against_a_constant_series_is_nan_not_a_warning(
+    block: SiteData,
+) -> None:
+    """A flat truth series makes correlation undefined; say so, quietly."""
+    table = temperature_proxy_comparison(block, _extremes_for(block, vary=False))
+    assert np.isnan(table.loc["t_range", "correlation"])
+    assert np.isfinite(table.loc["t_range", "mean_bias"]), "the bias is still defined"
+
+
+def test_proxy_comparison_skips_unreliable_days(block: SiteData) -> None:
+    extremes = _extremes_for(block)
+    extremes.iloc[: block.n_days // 2, extremes.columns.get_loc("reliable")] = False
+    table = temperature_proxy_comparison(block, extremes)
+
+    assert table["n_days"].iloc[0] == block.n_days - block.n_days // 2
+
+
+def test_proxy_comparison_needs_overlapping_dates(block: SiteData) -> None:
+    extremes = _extremes_for(block)
+    extremes.index = extremes.index + pd.Timedelta(days=10_000)
+
+    with pytest.raises(ValueError, match="share no usable dates"):
+        temperature_proxy_comparison(block, extremes)
 
 
 def test_sweep_carries_lai_alongside_gpp(block: SiteData) -> None:

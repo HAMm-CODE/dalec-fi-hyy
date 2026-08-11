@@ -130,36 +130,36 @@ def test_day_length_is_twelve_hours_at_the_equator() -> None:
         assert day_length_hours(doy, 0.0) == pytest.approx(12.0)
 
 
-def test_day_length_peaks_in_summer_and_troughs_in_winter() -> None:
-    """A latitude sign error is silent and severe, so this is asserted directly.
+def test_declination_peaks_at_the_june_solstice() -> None:
+    """Chuter's ``t`` is days since 21 December, not calendar day of year.
 
-    The peak lands at doy 182, not at the true June solstice near 172 -- see
-    ``test_the_published_declination_formula_lags_the_true_solstice``.
-    """
-    lengths = np.array([float(day_length_hours(doy, LATITUDE)) for doy in range(1, 366)])
-    peak_doy = int(lengths.argmax()) + 1
-    trough_doy = int(lengths.argmin()) + 1
-
-    assert 178 <= peak_doy <= 187, f"peak at doy {peak_doy}"
-    assert trough_doy >= 360 or trough_doy <= 5, f"trough at doy {trough_doy}"
-    assert lengths.max() == pytest.approx(19.18, abs=0.05)
-    assert lengths.min() == pytest.approx(4.82, abs=0.05)
-    assert lengths.max() / lengths.min() > 3.0
-
-
-def test_the_published_declination_formula_lags_the_true_solstice() -> None:
-    """Chuter B5 carries no phase offset, so it runs about ten days late.
-
-    ``delta = -0.408 * cos(2*pi*doy/365)`` peaks where the cosine is -1, at
-    doy 182.5, whereas the June solstice falls near doy 172. Implemented as
-    published rather than silently corrected, and pinned here so the offset is a
-    recorded property of the source rather than a surprise. The consequence is a
-    seasonal cycle shifted roughly ten days late; it does not affect the
-    amplitude, which is what the 1997 form got wrong.
+    Section II.A: the time scale is shifted ten days back so that ``t = 0`` falls
+    on 21 December, making the day-length function even around zero. Feeding B5 a
+    raw doy puts the solstice at 182 instead of 172 -- a silent ten-day phase
+    error, silent precisely because the amplitude is unaffected.
     """
     declination = solar_declination_rad(np.arange(1, 366))
-    assert int(declination.argmax()) + 1 == 182
-    assert int(declination.argmin()) + 1 == 365
+    peak_doy = int(declination.argmax()) + 1
+    trough_doy = int(declination.argmin()) + 1
+
+    assert abs(peak_doy - 172) <= 2, f"declination peaks at doy {peak_doy}"
+    assert abs(trough_doy - 355) <= 2, f"declination troughs at doy {trough_doy}"
+    assert math.degrees(float(declination.max())) == pytest.approx(23.4, abs=0.1)
+
+
+def test_day_length_matches_the_real_site_through_the_year() -> None:
+    """A latitude sign or phase error is silent and severe, so this is pinned."""
+    lengths = np.array([float(day_length_hours(doy, LATITUDE)) for doy in range(1, 366)])
+
+    assert int(lengths.argmax()) + 1 == pytest.approx(172, abs=2)
+    assert int(lengths.argmin()) + 1 == pytest.approx(355, abs=2)
+    # Against true values of roughly 19.0 h and 4.7 h at this latitude.
+    assert float(day_length_hours(172, LATITUDE)) == pytest.approx(19.2, abs=0.3)
+    assert float(day_length_hours(355, LATITUDE)) == pytest.approx(4.8, abs=0.3)
+    # Twelve hours everywhere on Earth at the equinoxes.
+    assert float(day_length_hours(80, LATITUDE)) == pytest.approx(12.0, abs=0.2)
+    assert float(day_length_hours(265, LATITUDE)) == pytest.approx(12.0, abs=0.2)
+    assert lengths.max() / lengths.min() > 3.0
 
 
 def test_southern_hemisphere_seasons_are_inverted() -> None:
@@ -173,12 +173,6 @@ def test_polar_day_and_night_are_clamped_rather_than_nan() -> None:
     assert day_length_hours(173, 80.0) == pytest.approx(24.0)
     assert day_length_hours(355, 80.0) == pytest.approx(0.0)
     assert np.isfinite(day_length_hours(np.arange(1, 367), 89.0)).all()
-
-
-def test_declination_peaks_near_the_june_solstice() -> None:
-    declination = solar_declination_rad(np.arange(1, 366))
-    assert float(declination.max()) == pytest.approx(0.408, abs=1e-3)
-    assert int(declination.argmax()) + 1 == pytest.approx(182, abs=3)
 
 
 def test_at_this_latitude_the_arccos_argument_never_needs_clamping() -> None:
@@ -196,11 +190,11 @@ def test_at_this_latitude_the_arccos_argument_never_needs_clamping() -> None:
 @pytest.mark.parametrize(
     ("doy", "williams", "dalec", "overstatement"),
     [
-        (15, 1.526, 0.126, 12.1),
-        (60, 1.607, 0.184, 8.7),
-        (173, 1.810, 0.342, 5.3),
-        (300, 1.581, 0.192, 8.3),
-        (350, 1.491, 0.126, 11.8),
+        (15, 1.526, 0.136, 11.3),
+        (60, 1.607, 0.199, 8.1),
+        (173, 1.810, 0.345, 5.3),
+        (300, 1.581, 0.176, 9.0),
+        (350, 1.491, 0.121, 12.3),
     ],
 )
 def test_the_1997_day_length_term_overstates_this_site(
@@ -263,8 +257,10 @@ def test_reproduces_a_hand_computed_gpp(acm: AcmModel) -> None:
     e_0 = c.a7 * c_fol**2 / (c_fol**2 + c.a9 * lma**2)
     p_i = (e_0 * sw_in * p_d) / (e_0 * sw_in + p_d)
 
-    # Eq. 12 -- true day length.
-    declination = -0.408 * math.cos(2.0 * math.pi * doy / 365.0)
+    # Eq. 12 -- true day length. Chuter's t is days since 21 December (doy 355),
+    # so the calendar day is shifted ten days forward before entering B5.
+    t_solar = (doy + 10) % 365
+    declination = -0.408 * math.cos(2.0 * math.pi * t_solar / 365.0)
     s = 24.0 * math.acos(-math.tan(math.radians(LATITUDE)) * math.tan(declination)) / math.pi
     expected = p_i * (c.a2 * s + c.a5)
 
@@ -499,13 +495,23 @@ def test_the_vectorised_path_warns_about_floored_ranges(acm: AcmModel) -> None:
         )
 
 
-def test_flooring_leaves_the_conductance_at_its_minimum(acm: AcmModel) -> None:
-    """Tr = 0 gives the smallest denominator, hence the largest conductance."""
+def test_flooring_maximises_conductance_and_so_inflates_gpp(acm: AcmModel) -> None:
+    """Tr = 0 gives the smallest denominator, hence the *largest* conductance.
+
+    The floor is therefore not the conservative choice. Measured on the real
+    record it raises GPP on the affected days by 2.8-10.9% depending on the
+    plausible Tr, and the whole-block total by 0.17-0.24%. Interim, pending true
+    daily minimum and maximum from the half-hourly product.
+    """
     c = LOOBOS_EVERGREEN
-    terms = acm.terms(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 10.0})
-    assert float(terms["g_c"]) == pytest.approx(
+    floored = acm.terms(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 10.0})
+    assert float(floored["g_c"]) == pytest.approx(
         abs(c.psi_mpa) ** c.a10 / (c.a6 * c.r_tot)
     )
+    # Larger than at any positive range, which is the point.
+    for t_range in (1.0, 5.0, 10.0):
+        positive = acm.terms(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 5.0 - t_range})
+        assert float(floored["g_c"]) > float(positive["g_c"])
 
 
 def test_conductance_denominator_is_still_guarded(acm: AcmModel) -> None:

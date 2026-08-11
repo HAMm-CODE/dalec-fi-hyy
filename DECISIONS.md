@@ -166,10 +166,19 @@ The arccos argument is clamped to [-1, 1]; inside the polar circles it genuinely
 leaves that interval, and the clamp turns that into 24 h or 0 h rather than a
 NaN. At FI-Hyy it stays within ±0.81 all year, so the clamp never fires here.
 
-**The published declination formula runs about ten days late.** It carries no
-phase offset, so it peaks at doy 182.5 where the June solstice falls near 172.
-Implemented as published, pinned by a test. It shifts the modelled seasonal cycle
-late; it does not affect the amplitude.
+**`t` is days since 21 December, not calendar day of year.** Chuter §II.A shifts
+the time scale ten days back so that `t = 0` falls on the shortest day and the
+day-length function is even around zero. Feeding B5 a raw doy puts the solstice
+at doy 182 instead of 172 — a ten-day phase error through the whole seasonal
+cycle, and silent, because the amplitude is unaffected. Corrected:
+
+```python
+t_solar = (doy + 10) % 365
+delta   = -0.408 * np.cos(2*np.pi*t_solar / 365.0)
+```
+
+Verified at 61.8474 N: 19.18 h at the solstice, 4.82 h at midwinter, 11.88 h at
+both equinoxes, against true values near 19.0, 4.7 and 12.2.
 
 **Substitutions and conventions.** `L = C_fol / c_lma` (Eq. A12), from model
 state rather than drivers. `Tmax` is the daily maximum, here `TA_F_DAY`;
@@ -178,13 +187,31 @@ B3 applies `exp(a8 * Tmax)` to the **maximum**, not to a mean. `Tr` is the
 what finally divides, and getting that factor of two wrong is silent.
 Decomposition in A5/A6 uses `TA_F`, a third and distinct temperature.
 
-**The daily range is floored at zero, counted and warned.** `Tr` is a range and
-cannot be negative, but the day/night means standing in for maximum and minimum
-do invert: at FI-Hyy on **14.8%** of calibration days, driving the B1 denominator
-negative on **5.0%** of them. The FULLSET daily product carries no `TA_F_MAX` or
-`TA_F_MIN` — only day and night means — so the proxy is the only option
-available. On floored days conductance takes its minimum rather than a measured
-value. `AcmModel.range_floor_count` reports the tally.
+**The daily range is floored at zero, counted and warned — interim only.** `Tr`
+is a range and cannot be negative, but the day/night means standing in for
+maximum and minimum do invert: at FI-Hyy on **14.8%** of calibration days,
+driving the B1 denominator negative on **5.0%** of them. The FULLSET **daily**
+product carries no `TA_F_MAX` or `TA_F_MIN` — only day and night means.
+`AcmModel.range_floor_count` reports the tally.
+
+**The floor is not the conservative direction.** `Tr = 0` minimises the B1
+denominator and therefore *maximises* conductance — `g_c = 4.570` against 1.25 at
+`Tr = 2` and 0.32 at `Tr = 10`. Measured, it **inflates** GPP on the affected
+days by 2.8% (against a plausible `Tr` of 1 °C) to 10.9% (against 4 °C), and the
+whole-block total by 0.17–0.24%, the affected days being mostly low-GPP winter
+days.
+
+**The real fix is the half-hourly product.** FULLSET **HH** carries half-hourly
+`TA_F`, from which true daily maximum and minimum are a groupby. Then `Tr` is
+non-negative by construction, the floor becomes unreachable, and the inversion
+problem disappears. Pending `scripts/01b_derive_tminmax.py`.
+
+**Half-range convention, verified.** B1 applies `0.5 * Tr` internally, so the
+`Tr` passed in must be the **full** range `T_max − T_min`, not the half-range
+Williams et al. Table 1 calls `D_T`. Checked directly: at `t_day = 20`,
+`t_night = 10`, `terms["t_range"] = 10.0` and `g_c = 0.321424`, which matches a
+denominator built from `0.5 × 10`. Halving twice would give 0.600603. Not
+halving twice.
 
 **Units.** Pools g C m⁻², fluxes g C m⁻² d⁻¹, temperature °C, radiation
 MJ m⁻² d⁻¹ (daily total), CO₂ µmol mol⁻¹, rate constants d⁻¹. FLUXNET daily
@@ -304,7 +331,8 @@ so the model extrapolates on most of the record. `ACM_CALIBRATION_BOUNDS`
 currently holds only the temperature row.
 
 **4. The day/night temperature proxy inverts on 14.8% of days**, floored and
-counted — see §3.
+counted — see §3. The floor inflates rather than suppresses. Interim, pending
+true daily min/max from the half-hourly product.
 
 **Scope: this site is outside the envelope DALEC2's authors defined.** Bloom &
 Williams (2015) §2.5 selected sites with little expected water stress and no more
@@ -344,9 +372,9 @@ comparison is not like-for-like.
 
 Flagged here so they cannot quietly become fact:
 
-- `site.latitude_deg` is `61.8474` in config, against `61.8475` in the working
-  notes. Confirm against the site metadata: a latitude error is silent, and day
-  length is what carries the seasonal cycle of photosynthesis at 62 N.
+- `site.latitude_deg` is `61.8474`. Still to be confirmed against site metadata:
+  a latitude error is silent, and day length is what carries the seasonal cycle
+  of photosynthesis at 62 N.
 - The target projected LAI of ≈ 3 for FI-Hyy is provisional pending a citation
   from the SMEAR II literature.
 - `lma = 110` g C m⁻² is Chuter's Loobos reference value, used as a working value

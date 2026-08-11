@@ -77,6 +77,7 @@ __all__ = [
     "format_gpp_magnitude_report",
     "gpp_magnitude_gate",
     "shoulder_season_gpp",
+    "temperature_proxy_comparison",
 ]
 
 #: Partitioned products compared against. Consistency check only, never
@@ -561,6 +562,105 @@ def shoulder_season_gpp(
         )
 
     return pd.DataFrame(rows).set_index("year")
+
+
+def temperature_proxy_comparison(
+    site_data: SiteData, daily_extremes: pd.DataFrame
+) -> pd.DataFrame:
+    """What the day/night proxy costs, against true daily extremes.
+
+    ACM wants the daily maximum, minimum and range. The FULLSET **daily** product
+    carries none of them -- only daytime and nighttime *means* -- so
+    ``TA_F_DAY`` and ``TA_F_NIGHT`` stand in. Those means are not extremes, and
+    they can invert, which no range is allowed to do.
+
+    ``scripts/01b_derive_tminmax.py`` derives the true extremes from the
+    half-hourly product, where they are a groupby and the range is non-negative
+    by construction. This measures the gap between the two, which is a thesis
+    limitation figure rather than merely a check.
+
+    Parameters
+    ----------
+    site_data
+        Driver record carrying the proxy, ``t_day`` and ``t_night``.
+    daily_extremes
+        Output of ``01b_derive_tminmax.py``, indexed by date, with ``t_max``,
+        ``t_min``, ``t_range`` and ``reliable`` columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per compared quantity, indexed by name:
+
+        ``n_days``
+            Days compared, i.e. present and reliable in both.
+        ``correlation``
+            Pearson correlation between proxy and truth.
+        ``mean_bias``
+            Mean of proxy minus truth, degrees C. Negative means the proxy
+            underestimates.
+        ``rmse``
+            Root mean squared difference, degrees C.
+        ``proxy_min``, ``truth_min``
+            Minima, which is where the range comparison bites: the proxy goes
+            negative and the truth cannot.
+
+    Raises
+    ------
+    ValueError
+        If the two records share no dates.
+    """
+    truth = daily_extremes.copy()
+    truth.index = pd.to_datetime(truth.index)
+    dates = pd.DatetimeIndex(site_data.time).normalize()
+
+    aligned = truth.reindex(dates)
+    usable = np.asarray(aligned["t_max"].notna().to_numpy(), dtype=bool).copy()
+    if "reliable" in aligned:
+        usable &= np.asarray(
+            aligned["reliable"].fillna(False).to_numpy(), dtype=bool
+        )
+    if not usable.any():
+        raise ValueError(
+            "the driver record and the derived daily extremes share no usable "
+            "dates; check that 01b_derive_tminmax.py covered this period"
+        )
+
+    proxy_range = site_data.t_day - site_data.t_night
+    pairs = {
+        "t_max vs TA_F_DAY": (site_data.t_day, aligned["t_max"].to_numpy()),
+        "t_min vs TA_F_NIGHT": (site_data.t_night, aligned["t_min"].to_numpy()),
+        "t_range": (proxy_range, aligned["t_range"].to_numpy()),
+    }
+
+    def correlation(a: np.ndarray, b: np.ndarray) -> float:
+        """Pearson correlation, NaN when either series is constant.
+
+        ``np.corrcoef`` divides by the standard deviation, so a constant series
+        yields NaN *and* a RuntimeWarning. Returning NaN directly keeps the
+        undefined case undefined without the noise.
+        """
+        if a.size < 2 or a.std() == 0.0 or b.std() == 0.0:
+            return float("nan")
+        return float(np.corrcoef(a, b)[0, 1])
+
+    rows = []
+    for name, (proxy, true_values) in pairs.items():
+        p, t = proxy[usable], true_values[usable]
+        difference = p - t
+        rows.append(
+            {
+                "quantity": name,
+                "n_days": int(usable.sum()),
+                "correlation": correlation(p, t),
+                "mean_bias": float(difference.mean()),
+                "rmse": float(np.sqrt(np.mean(difference**2))),
+                "proxy_min": float(p.min()),
+                "truth_min": float(t.min()),
+            }
+        )
+
+    return pd.DataFrame(rows).set_index("quantity")
 
 
 def calibration_bound_coverage(site_data: SiteData) -> pd.DataFrame:

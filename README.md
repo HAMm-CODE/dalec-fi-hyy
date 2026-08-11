@@ -250,10 +250,14 @@ applied last so the arithmetic always runs on finite values. It was previously
 described as load-bearing; that rested on measurements made against the wrong
 day-length term, and under the corrected form it no longer carries that weight.
 
-The **daily temperature range is floored at zero**, counted and warned. `Tr` is a
-range and cannot be negative, but the day/night means standing in for maximum and
-minimum invert on **14.8%** of calibration days. The FULLSET daily product
-carries no `TA_F_MAX` or `TA_F_MIN`, so the proxy is the only option available.
+The **daily temperature range is floored at zero**, counted and warned —
+**interim**. `Tr` is a range and cannot be negative, but the day/night means
+standing in for maximum and minimum invert on **14.8%** of calibration days. The
+FULLSET *daily* product carries no `TA_F_MAX` or `TA_F_MIN`. Note the direction:
+`Tr = 0` maximises conductance, so the floor **inflates** GPP on those days — by
+2.8–10.9% there, 0.17–0.24% over the whole block. The real fix is to derive true
+daily min/max from the half-hourly product, where `Tr` is non-negative by
+construction.
 
 ### GPP magnitude gate
 
@@ -289,9 +293,8 @@ years. Under the old ACM the ratio was 2.9–3.4 with LAI running to 22.8, and n
 **Known problems that remain**, measured and recorded in
 [acm.py](src/dalec/acm.py): the direct temperature response is still weak (~2%
 across 20 °C — the seasonal cycle is carried by day length and irradiance, not
-temperature); the coefficient sets are site-calibrated and neither is boreal; and
-Chuter's declination formula carries no phase offset, so it runs about ten days
-late.
+temperature); and the coefficient sets are site-calibrated with neither one
+boreal.
 
 **Scope.** Bloom & Williams (2015) §2.5 selected sites with little water stress
 and at most **three months** of below-freezing soil temperature, those criteria

@@ -126,13 +126,15 @@ denominator; the light limitation damps both. The 1997 form gave 0.5% across
 here is carried by day length and irradiance, not by temperature.** That
 distinction matters for RQ3 and must not be reported as resolved.
 
-**The published declination formula runs about ten days late.** Chuter B5,
-``delta = -0.408 * cos(2*pi*doy/365)``, carries no phase offset, so it peaks at
-doy 182.5 where the June solstice falls near doy 172, and troughs at doy 365
-rather than near 355. Implemented as published rather than silently corrected,
-and pinned by ``test_the_published_declination_formula_lags_the_true_solstice``.
-It shifts the modelled seasonal cycle roughly ten days late; it does not affect
-the amplitude, which is the part the 1997 form got wrong.
+**Chuter's time origin is 21 December, not 1 January.** B5's ``t`` is days since
+the winter solstice -- Section II.A shifts the time scale ten days back so the
+day-length function is even around zero. Feeding it a raw calendar day of year
+puts the solstice at doy 182 instead of 172 and the trough at 365 instead of 355:
+a ten-day phase error through the entire seasonal cycle, and a silent one,
+because the amplitude is identical and nothing looks wrong. With the origin
+corrected, day length at 61.8474 N comes out 19.18 h at the solstice, 4.82 h at
+midwinter and 11.88 h at both equinoxes, against true values near 19.0, 4.7 and
+12.2.
 
 **The frost mask still does something, but far less.** On a cold dim day it now
 suppresses about 0.68 g C m-2 d-1, against roughly 2.66 under the 1997 form.
@@ -344,6 +346,16 @@ _DISCRIMINANT_FLOOR: Final[float] = 0.0
 #: 365, not 365.25: it is what the published expression uses.
 _DECLINATION_YEAR_DAYS: Final[float] = 365.0
 
+#: Offset from calendar day of year to Chuter's solar time origin, days.
+#:
+#: Chuter Section II.A: "The time scale has been shifted ten days back, so that
+#: t = 0 occurs on the 21st December, the shortest day. This was done in order to
+#: ensure that the daylength function is even around zero." So ``t`` in B5 is
+#: days since 21 December (doy 355), **not** calendar day of year. Feeding B5 a
+#: raw doy puts the solstice at doy 182 instead of 172 -- a ten-day phase error
+#: in the whole seasonal cycle, and silent, because the amplitude is unaffected.
+_SOLAR_ORIGIN_OFFSET_DAYS: Final[float] = 10.0
+
 
 # ---------------------------------------------------------------------------
 # Driver transforms
@@ -388,11 +400,20 @@ def leaf_area_index(c_fol: Any, lma: Any) -> Any:
 def solar_declination_rad(doy: Any) -> np.ndarray:
     """Solar declination, radians (Chuter B5).
 
-    ``delta = -0.408 * cos(2*pi*doy / 365)``. Peaks near +0.409 rad (23.4 deg) at
-    the June solstice.
+    ``delta = -0.408 * cos(2*pi*t / 365)`` where ``t`` is **days since 21
+    December**, not calendar day of year -- see :data:`_SOLAR_ORIGIN_OFFSET_DAYS`
+    for the passage that says so. Peaks at +0.408 rad (23.4 deg) at doy 172, the
+    June solstice, and troughs at doy 355.
+
+    Passing a raw day of year here is a silent ten-day phase error: the amplitude
+    is identical, so nothing looks wrong, but the whole modelled seasonal cycle
+    sits ten days late against the observations it is fitted to.
     """
+    solar_day = (
+        np.asarray(doy, dtype=float) + _SOLAR_ORIGIN_OFFSET_DAYS
+    ) % _DECLINATION_YEAR_DAYS
     return np.asarray(
-        -0.408 * np.cos(2.0 * np.pi * np.asarray(doy, dtype=float) / _DECLINATION_YEAR_DAYS),
+        -0.408 * np.cos(2.0 * np.pi * solar_day / _DECLINATION_YEAR_DAYS),
         dtype=float,
     )
 
@@ -514,8 +535,18 @@ def acm_terms(
     # TA_F_MAX or TA_F_MIN, so this proxy is the only one available.
     #
     # Floored at zero, because a negative diurnal range is not a physical state
-    # the model should integrate. Counted and reported, never silent: on those
-    # days conductance takes its minimum rather than a measured value.
+    # the model should integrate. Counted and reported, never silent.
+    #
+    # Note the direction, which is not the conservative one. Tr = 0 *minimises*
+    # the B1 denominator and therefore *maximises* conductance: g_c = 4.570
+    # against 1.25 at Tr = 2 and 0.32 at Tr = 10. Measured, the floor inflates
+    # GPP on the affected days by 2.8% (against a plausible Tr of 1 degC) to
+    # 10.9% (against 4 degC). Over the whole calibration block the effect is
+    # +0.17% to +0.24%, because the affected days are mostly low-GPP winter days.
+    #
+    # This is an interim treatment. The real fix is to take true daily maximum
+    # and minimum from the half-hourly FLUXNET product, where Tr is non-negative
+    # by construction and this floor becomes unreachable.
     t_range_floored = np.asarray(t_range_raw < 0.0, dtype=bool)
     t_range = np.maximum(t_range_raw, 0.0)
     # Warn on the vectorised path only. The per-day scalar path runs once per
@@ -525,8 +556,9 @@ def acm_terms(
         warnings.warn(
             f"daily temperature range was negative on "
             f"{int(np.count_nonzero(t_range_floored))} day(s) -- TA_F_DAY below "
-            "TA_F_NIGHT -- and was floored at zero. Canopy conductance takes its "
-            "minimum on those days rather than a measured value.",
+            "TA_F_NIGHT -- and was floored at zero. Tr = 0 maximises canopy "
+            "conductance, so this inflates GPP on those days rather than "
+            "suppressing it; interim treatment pending true daily min/max.",
             RuntimeWarning,
             stacklevel=2,
         )
@@ -642,7 +674,8 @@ class AcmModel:
         Number of days on which the daily temperature range came out negative --
         the day/night means inverting -- and was floored at zero. At FI-Hyy this
         is around 15% of days and is a property of the driver product, not a
-        fault. Conductance takes its minimum on those days.
+        fault. Tr = 0 maximises conductance, so the floor inflates GPP on those
+        days; see :func:`acm_terms` for the measured magnitude.
     """
 
     def __init__(
