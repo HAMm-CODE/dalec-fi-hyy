@@ -18,15 +18,21 @@ site:
   # Evergreen needleleaf forest (Scots pine). Being evergreen is the ecological
   # ground for fixing the five phenology parameters in Phase 4.
   igbp: ENF
+
+  # --- Fixed ACM site constant. REQUIRED, no default. -----------------------
+  # Latitude drives the day length term of Chuter et al. Eq. 12 and is the only
+  # site constant ACM needs. dalec.acm.acm_from_config raises rather than
+  # guessing it. Confirm against the site metadata: a latitude sign or magnitude
+  # error is silent and severe, since day length is what carries the seasonal
+  # cycle of photosynthesis at 62 N.
   latitude_deg: 61.8474
   longitude_deg: 24.2948
 
-  # --- Fixed ACM site constants. REQUIRED, no defaults. ---------------------
-  # Neither is a DALEC2 parameter and neither is a driver: both are properties
-  # of the stand, taken from the site literature. dalec.acm.acm_from_config
-  # raises rather than guessing them.
-  canopy_height_m: null    # H, metres
-  psi_d_mpa: null          # psi_d, leaf-to-soil water potential difference, MPa, negative
+  # Canopy height and the leaf-to-soil water potential difference were required
+  # while ACM was implemented from Williams et al. (1997). DALEC does not use
+  # that form: canopy height does not appear in its conductance equation at all,
+  # and the water potential is a coefficient of the site-calibrated parameter
+  # set rather than a config value. Both are gone. See src/dalec/acm.py.
 
 # --- Photosynthesis (ACM) ----------------------------------------------------
 acm:
@@ -34,13 +40,13 @@ acm:
   # over 7-30 degC (Williams et al. Table 1) and must not extrapolate; -2.0 is
   # the precedent those authors applied at their Oregon coniferous sites.
   #
-  # This is LOAD-BEARING, not cleanup. Sweeping LAI and ceff across their whole
-  # prior ranges cannot produce a realistic summer peak together with a small
-  # winter floor -- the achievable summer/winter ratio is structurally capped
-  # near 8, against an effectively unbounded true ratio. The cutoff is the only
-  # mechanism available to suppress the temperature-independent floor. Raising
-  # it towards zero, or disabling it, silently reintroduces roughly 970
-  # g C m-2 yr-1 of spurious photosynthesis. See src/dalec/acm.py.
+  # This was previously described here as load-bearing, on the measurement that
+  # nothing else could suppress the winter GPP floor. That measurement was made
+  # against the Williams et al. (1997) day length term, which contains no
+  # latitude and overstates midwinter at this site by roughly 12x. Under the
+  # DALEC form the floor is far smaller and the cutoff no longer carries that
+  # weight. It is retained on its original published justification -- refusing to
+  # extrapolate below the calibration range -- and its effect is measured.
   frost_threshold_degc: -2.0
 
 # --- Paths -------------------------------------------------------------------

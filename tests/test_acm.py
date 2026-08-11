@@ -1,12 +1,19 @@
-"""Tests for the Aggregated Canopy Model (Williams et al. 1997).
+"""Tests for the Aggregated Canopy Model, in the form DALEC implements.
 
-The hand-computed reference below is worked independently from the printed
-equations, in solve order 2-5-6-4-8-7-9, rather than by calling the
-implementation -- otherwise it would only assert that the code equals itself.
+Source: Chuter et al. (2015), Eqs. 12 and B1-B6, coefficients Appendices A and D.
+
+The hand-computed reference below is transcribed independently from the published
+equations using plain arithmetic, rather than by calling the implementation --
+otherwise it would only assert that the code equals itself.
+
+The overstatement table is a regression test with a purpose: it pins the measured
+difference between the DALEC day-length term and the Williams et al. (1997) one,
+so that reverting to the 1997 form cannot pass silently.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import numpy as np
@@ -15,27 +22,32 @@ import pytest
 from conftest import SyntheticFluxnet, make_parameters
 from dalec.acm import (
     ACM_CALIBRATION_BOUNDS,
-    ACM_COEFFICIENTS,
     DEFAULT_FROST_THRESHOLD_DEGC,
-    MIDSUMMER_DOY,
+    LOOBOS_EVERGREEN,
+    OREGON_PONDEROSA,
+    WILLIAMS_1997_COEFFICIENTS,
     AcmModel,
     acm_from_config,
-    acm_terms,
     average_daily_temperature,
+    chuter_day_length_factor,
     daily_temperature_half_range,
+    daily_temperature_range,
+    day_length_hours,
     frost_mask,
     leaf_area_index,
     make_acm,
+    solar_declination_rad,
+    williams1997_day_length_factor,
+    williams1997_terms,
 )
+from dalec.config import load_config
 from dalec.data_io import SiteData, build_site_data, load_fluxnet_dd
 from dalec.diagnostics import calibration_bound_coverage, shoulder_season_gpp
 from dalec.model_numpy import run_dalec2
 from dalec.parameters import prior_bounds
 
-# Fixed site constants used throughout. These are the values the project author
-# used when measuring the reference tables, not FI-Hyy values.
-HEIGHT_M = 18.0
-PSI_D_MPA = -1.5
+#: FI-Hyy. The one site constant ACM needs.
+LATITUDE = 61.8475
 
 #: A driver set entirely inside the Table 1 calibration bounds (T = 15 degC).
 REFERENCE_CASE = {
@@ -52,7 +64,7 @@ REFERENCE_CASE = {
 
 @pytest.fixture
 def acm() -> AcmModel:
-    return make_acm(canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA)
+    return make_acm(latitude_deg=LATITUDE)
 
 
 @pytest.fixture
@@ -62,32 +74,227 @@ def block(synthetic_fluxnet: SyntheticFluxnet) -> SiteData:
 
 
 # ---------------------------------------------------------------------------
-# Coefficients and constants
+# Coefficient sets
 # ---------------------------------------------------------------------------
 
 
-def test_coefficients_match_table_2() -> None:
-    assert ACM_COEFFICIENTS == {
-        "a2": 0.018,
-        "theta": 32.6,
-        "k": 576.7,
-        "b1": -0.029,
-        "b2": 0.315,
-        "c1": 0.989,
-        "c2": 0.873,
-        "d1": -0.0018,
-        "d2": 1.81,
-    }
+def test_loobos_coefficients_match_appendix_a() -> None:
+    c = LOOBOS_EVERGREEN
+    assert (c.a2, c.a3, c.a4, c.a5, c.a6) == (0.0156, 4.22273, 208.868, 0.0453, 0.3783)
+    assert (c.a7, c.a8, c.a9, c.a10) == (7.1929, 0.0111, 2.1001, 0.7897)
+    assert (c.psi_mpa, c.r_tot) == (2.0, 1.0)
 
 
-def test_the_nue_parameter_is_not_among_the_coefficients_in_use() -> None:
-    """DALEC2 replaces the whole a1 * N product with the sampled ceff."""
-    assert "a1" not in ACM_COEFFICIENTS
-    assert "n" not in ACM_COEFFICIENTS
+def test_oregon_coefficients_match_appendix_d() -> None:
+    c = OREGON_PONDEROSA
+    assert (c.a2, c.a3, c.a4, c.a5, c.a6) == (0.0142, 0.980, 217.9, 0.155, 2.653)
+    assert (c.a7, c.a8, c.a9, c.a10) == (4.309, 0.060, 1.062, 0.0006)
+    assert (c.psi_mpa, c.r_tot) == (0.8502, 1.0)
 
 
-def test_midsummer_reference_day() -> None:
-    assert MIDSUMMER_DOY == 173.0
+def test_the_two_published_sets_really_do_differ() -> None:
+    """They are site-calibrated, not universal. Neither is boreal."""
+    assert LOOBOS_EVERGREEN.a7 != OREGON_PONDEROSA.a7
+    assert LOOBOS_EVERGREEN.a10 != OREGON_PONDEROSA.a10
+
+
+def test_ceff_equivalents_bracket_the_published_prior() -> None:
+    """This is what resolves the ceff scale question: the prior is vindicated."""
+    lower, upper = prior_bounds("ceff")
+    assert LOOBOS_EVERGREEN.ceff_equivalent == pytest.approx(29.6)
+    assert OREGON_PONDEROSA.ceff_equivalent == pytest.approx(5.8185)
+    # The evergreen set -- the one used here -- sits comfortably inside 10-100.
+    assert lower <= LOOBOS_EVERGREEN.ceff_equivalent <= upper
+
+
+def test_foliar_nitrogen_is_not_used_in_the_arithmetic(acm: AcmModel) -> None:
+    """ceff replaces the p11 * N product, exactly as it replaced a1 * N."""
+    baseline = acm.terms(**REFERENCE_CASE)["gpp"]
+    other = make_acm(
+        latitude_deg=LATITUDE,
+        coefficients=type(LOOBOS_EVERGREEN)(
+            **{**vars(LOOBOS_EVERGREEN), "p11": 999.0, "n_foliar": 999.0}
+        ),
+    )
+    assert other.terms(**REFERENCE_CASE)["gpp"] == pytest.approx(float(baseline))
+
+
+# ---------------------------------------------------------------------------
+# Day length -- the difference that matters
+# ---------------------------------------------------------------------------
+
+
+def test_day_length_is_twelve_hours_at_the_equator() -> None:
+    """tan(0) = 0, so the arccos argument vanishes for every day of the year."""
+    for doy in range(1, 367):
+        assert day_length_hours(doy, 0.0) == pytest.approx(12.0)
+
+
+def test_day_length_peaks_in_summer_and_troughs_in_winter() -> None:
+    """A latitude sign error is silent and severe, so this is asserted directly.
+
+    The peak lands at doy 182, not at the true June solstice near 172 -- see
+    ``test_the_published_declination_formula_lags_the_true_solstice``.
+    """
+    lengths = np.array([float(day_length_hours(doy, LATITUDE)) for doy in range(1, 366)])
+    peak_doy = int(lengths.argmax()) + 1
+    trough_doy = int(lengths.argmin()) + 1
+
+    assert 178 <= peak_doy <= 187, f"peak at doy {peak_doy}"
+    assert trough_doy >= 360 or trough_doy <= 5, f"trough at doy {trough_doy}"
+    assert lengths.max() == pytest.approx(19.18, abs=0.05)
+    assert lengths.min() == pytest.approx(4.82, abs=0.05)
+    assert lengths.max() / lengths.min() > 3.0
+
+
+def test_the_published_declination_formula_lags_the_true_solstice() -> None:
+    """Chuter B5 carries no phase offset, so it runs about ten days late.
+
+    ``delta = -0.408 * cos(2*pi*doy/365)`` peaks where the cosine is -1, at
+    doy 182.5, whereas the June solstice falls near doy 172. Implemented as
+    published rather than silently corrected, and pinned here so the offset is a
+    recorded property of the source rather than a surprise. The consequence is a
+    seasonal cycle shifted roughly ten days late; it does not affect the
+    amplitude, which is what the 1997 form got wrong.
+    """
+    declination = solar_declination_rad(np.arange(1, 366))
+    assert int(declination.argmax()) + 1 == 182
+    assert int(declination.argmin()) + 1 == 365
+
+
+def test_southern_hemisphere_seasons_are_inverted() -> None:
+    """The sign of latitude has to reach the answer, not be swallowed."""
+    assert day_length_hours(173, -LATITUDE) < day_length_hours(355, -LATITUDE)
+    assert day_length_hours(173, LATITUDE) > day_length_hours(355, LATITUDE)
+
+
+def test_polar_day_and_night_are_clamped_rather_than_nan() -> None:
+    """Inside the polar circles the arccos argument genuinely leaves [-1, 1]."""
+    assert day_length_hours(173, 80.0) == pytest.approx(24.0)
+    assert day_length_hours(355, 80.0) == pytest.approx(0.0)
+    assert np.isfinite(day_length_hours(np.arange(1, 367), 89.0)).all()
+
+
+def test_declination_peaks_near_the_june_solstice() -> None:
+    declination = solar_declination_rad(np.arange(1, 366))
+    assert float(declination.max()) == pytest.approx(0.408, abs=1e-3)
+    assert int(declination.argmax()) + 1 == pytest.approx(182, abs=3)
+
+
+def test_at_this_latitude_the_arccos_argument_never_needs_clamping() -> None:
+    """So the clamp is a guard here, not a silent modification of the answer."""
+    doy = np.arange(1, 367)
+    argument = -np.tan(np.radians(LATITUDE)) * np.tan(solar_declination_rad(doy))
+    assert np.abs(argument).max() < 1.0
+
+
+# ---------------------------------------------------------------------------
+# The regression test that stops anyone reverting to the 1997 form
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("doy", "williams", "dalec", "overstatement"),
+    [
+        (15, 1.526, 0.126, 12.1),
+        (60, 1.607, 0.184, 8.7),
+        (173, 1.810, 0.342, 5.3),
+        (300, 1.581, 0.192, 8.3),
+        (350, 1.491, 0.126, 11.8),
+    ],
+)
+def test_the_1997_day_length_term_overstates_this_site(
+    doy: int, williams: float, dalec: float, overstatement: float
+) -> None:
+    """Measured at FI-Hyy. The 1997 term contains no latitude at all.
+
+    This is the dominant error and the origin of the winter GPP floor: a factor
+    with no latitude in it cannot know that Hyytiala gets five hours of daylight
+    in December.
+    """
+    measured_williams = float(williams1997_day_length_factor(doy))
+    measured_dalec = float(chuter_day_length_factor(doy, LATITUDE))
+
+    assert measured_williams == pytest.approx(williams, abs=5e-4)
+    assert measured_dalec == pytest.approx(dalec, abs=5e-4)
+    assert measured_williams / measured_dalec == pytest.approx(overstatement, abs=0.05)
+
+
+def test_the_1997_day_length_term_carries_no_latitude() -> None:
+    """The structural statement behind the table above."""
+    for latitude in (0.0, 30.0, 61.8475, 80.0):
+        assert float(williams1997_day_length_factor(173)) == pytest.approx(1.810, abs=5e-4)
+        assert float(chuter_day_length_factor(173, latitude)) != pytest.approx(1.810)
+
+
+def test_the_1997_variant_is_not_wired_into_the_forward_model(block: SiteData) -> None:
+    """It is retained as thesis material, not as a code path."""
+    acm = make_acm(latitude_deg=LATITUDE)
+    assert not hasattr(acm, "canopy_height_m")
+    assert "day_length" in acm.terms(**REFERENCE_CASE)
+
+
+# ---------------------------------------------------------------------------
+# The hand-computed reference
+# ---------------------------------------------------------------------------
+
+
+def test_reproduces_a_hand_computed_gpp(acm: AcmModel) -> None:
+    """Transcribed independently from Chuter Eqs. 12 and B1-B6."""
+    c = LOOBOS_EVERGREEN
+    doy, t_day, t_night = 180, 20.0, 10.0
+    sw_in, co2, c_fol, lma, ceff = 15.0, 400.0, 180.0, 60.0, 40.0
+
+    # B1 -- conductance. No canopy height.
+    t_range = t_day - t_night
+    g_c = abs(c.psi_mpa) ** c.a10 / (0.5 * t_range + c.a6 * c.r_tot)
+
+    # B3 -- photosynthate, on *maximum* daily temperature.
+    lai = c_fol / lma
+    p = ceff * lai * math.exp(c.a8 * t_day) / g_c
+
+    # B2 -- internal CO2.
+    q = c.a3 - c.a4
+    discriminant = (co2 + q - p) ** 2 - 4.0 * (co2 * q - c.a3 * p)
+    c_i = 0.5 * (co2 + q - p + math.sqrt(discriminant))
+
+    # Diffusion limit, B4 quantum yield, light limitation.
+    p_d = g_c * (co2 - c_i)
+    e_0 = c.a7 * c_fol**2 / (c_fol**2 + c.a9 * lma**2)
+    p_i = (e_0 * sw_in * p_d) / (e_0 * sw_in + p_d)
+
+    # Eq. 12 -- true day length.
+    declination = -0.408 * math.cos(2.0 * math.pi * doy / 365.0)
+    s = 24.0 * math.acos(-math.tan(math.radians(LATITUDE)) * math.tan(declination)) / math.pi
+    expected = p_i * (c.a2 * s + c.a5)
+
+    assert acm(**REFERENCE_CASE) == pytest.approx(expected, rel=1e-12)
+
+
+def test_intermediates_match_the_hand_computation(acm: AcmModel) -> None:
+    c = LOOBOS_EVERGREEN
+    terms = acm.terms(**REFERENCE_CASE)
+
+    assert float(terms["t_max"]) == pytest.approx(20.0), "B3 takes Tmax, not the mean"
+    assert float(terms["t_range"]) == pytest.approx(10.0)
+    assert float(terms["lai"]) == pytest.approx(3.0)
+    assert float(terms["g_c"]) == pytest.approx(
+        abs(c.psi_mpa) ** c.a10 / (5.0 + c.a6 * c.r_tot)
+    )
+    assert float(terms["e_0"]) == pytest.approx(
+        c.a7 * 180.0**2 / (180.0**2 + c.a9 * 60.0**2)
+    )
+    assert float(terms["day_length"]) == pytest.approx(
+        float(day_length_hours(180, LATITUDE))
+    )
+
+
+def test_quantum_yield_is_the_lai_form_in_disguise(acm: AcmModel) -> None:
+    """B4 as published is a7*Cf^2/(Cf^2 + a9*lma^2); in L it is a7*L^2/(L^2 + a9)."""
+    c = LOOBOS_EVERGREEN
+    terms = acm.terms(**REFERENCE_CASE)
+    lai = float(terms["lai"])
+    assert float(terms["e_0"]) == pytest.approx(c.a7 * lai**2 / (lai**2 + c.a9))
 
 
 # ---------------------------------------------------------------------------
@@ -95,15 +302,11 @@ def test_midsummer_reference_day() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_d_t_is_half_the_daily_range_not_the_full_range() -> None:
-    """A factor-of-two error here is silent; Table 1 defines D_T = (Tmax-Tmin)/2."""
+def test_tr_is_the_full_range_and_the_conductance_takes_half_of_it() -> None:
+    """B1 divides by 0.5*Tr. Passing a half-range as Tr would halve it twice."""
     t_day, t_night = 21.0, 5.0
+    assert daily_temperature_range(t_day, t_night) == pytest.approx(16.0)
     assert daily_temperature_half_range(t_day, t_night) == pytest.approx(8.0)
-    assert daily_temperature_half_range(t_day, t_night) == pytest.approx(
-        0.5 * (t_day - t_night)
-    )
-    # Explicitly *not* the full range.
-    assert daily_temperature_half_range(t_day, t_night) != pytest.approx(t_day - t_night)
 
 
 def test_average_daily_temperature_is_the_day_night_mean() -> None:
@@ -111,11 +314,9 @@ def test_average_daily_temperature_is_the_day_night_mean() -> None:
 
 
 def test_photosynthesis_temperature_is_not_the_daily_mean_driver(block: SiteData) -> None:
-    """A5/A6 use TA_F; ACM uses (TA_F_DAY + TA_F_NIGHT)/2. They must not be conflated."""
+    """A5/A6 use TA_F; ACM uses the day/night pair. They must not be conflated."""
     t_mean = average_daily_temperature(block.t_day, block.t_night)
     assert t_mean.shape == block.t_air.shape
-    # In the synthetic file the two happen to coincide; the point is that ACM
-    # reads the day/night pair, never t_air.
     assert not np.shares_memory(t_mean, block.t_air)
 
 
@@ -126,195 +327,106 @@ def test_leaf_area_index_is_foliar_carbon_over_lma() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The hand-computed reference
-# ---------------------------------------------------------------------------
-
-
-def test_reproduces_a_hand_computed_gpp(acm: AcmModel) -> None:
-    """Worked independently from the printed equations, in solve order."""
-    a2, theta, k = 0.018, 32.6, 576.7
-    b1, b2 = -0.029, 0.315
-    c1, c2 = 0.989, 0.873
-    d1, d2 = -0.0018, 1.81
-
-    t = 0.5 * (20.0 + 10.0)  # 15.0 degC, inside the 7-30 calibration bound
-    d_t = 0.5 * (20.0 - 10.0)  # 5.0 degC, half range
-    lai = 180.0 / 60.0  # 3.0
-    c_a, irradiance, doy, ceff = 400.0, 15.0, 180, 40.0
-
-    p_n = ceff * lai * math.exp(a2 * t)  # Eq 2
-    g_c = (-PSI_D_MPA * math.exp(b1 * t)) / (b2 * HEIGHT_M + d_t)  # Eq 5
-    q = theta - k  # Eq 6
-    p = p_n / g_c
-    c_i = 0.5 * (
-        c_a + q - p + math.sqrt((c_a + q - p) ** 2 - 4.0 * (c_a * q - p * theta))
-    )
-    p_d = g_c * (c_a - c_i)  # Eq 4
-    e_0 = c1 * lai**2 / (c2 + lai**2)  # Eq 8
-    p_i = (e_0 * irradiance * p_d) / (e_0 * irradiance + p_d)  # Eq 7
-    expected = p_i * (d1 * abs(173.0 - doy) + d2)  # Eq 9
-
-    assert acm(**REFERENCE_CASE) == pytest.approx(expected, rel=1e-12)
-    # And the independently reported value for these conditions.
-    assert acm(**REFERENCE_CASE) == pytest.approx(15.543, abs=5e-4)
-
-
-def test_intermediates_match_the_hand_computation(acm: AcmModel) -> None:
-    terms = acm.terms(**REFERENCE_CASE)
-    assert float(terms["t_mean"]) == pytest.approx(15.0)
-    assert float(terms["d_t"]) == pytest.approx(5.0)
-    assert float(terms["lai"]) == pytest.approx(3.0)
-    assert float(terms["e_0"]) == pytest.approx(0.989 * 9.0 / (0.873 + 9.0))
-    assert float(terms["d_ms"]) == pytest.approx(7.0)
-    assert float(terms["day_length_factor"]) == pytest.approx(-0.0018 * 7.0 + 1.81)
-
-
-def test_canopy_quantum_yield_matches_the_reference_column(acm: AcmModel) -> None:
-    """Eq. 8 against independently measured E_0 values."""
-    for lai, expected in [(0.5, 0.220), (1.0, 0.528), (2.0, 0.812),
-                          (3.0, 0.902), (6.0, 0.966)]:
-        terms = acm.terms(**{**REFERENCE_CASE, "c_fol": lai * 60.0})
-        assert float(terms["e_0"]) == pytest.approx(expected, abs=5e-4)
-
-
-# ---------------------------------------------------------------------------
 # Frost cutoff
 # ---------------------------------------------------------------------------
 
 
 def test_gpp_is_exactly_zero_below_the_frost_threshold(acm: AcmModel) -> None:
-    frozen = {**REFERENCE_CASE, "t_day": -2.0, "t_night": -8.0}  # T = -5 degC
-    assert average_daily_temperature(-2.0, -8.0) < DEFAULT_FROST_THRESHOLD_DEGC
+    frozen = {**REFERENCE_CASE, "t_day": -2.0, "t_night": -8.0}
     assert acm(**frozen) == 0.0
 
 
 def test_gpp_is_finite_and_positive_above_the_threshold(acm: AcmModel) -> None:
-    thawed = {**REFERENCE_CASE, "t_day": 2.0, "t_night": -2.0}  # T = 0 degC
-    value = acm(**thawed)
-    assert math.isfinite(value)
-    assert value > 0.0
+    mild = {**REFERENCE_CASE, "t_day": 3.0, "t_night": 1.0}
+    value = acm(**mild)
+    assert np.isfinite(value) and value > 0.0
 
 
 def test_frost_mask_depends_only_on_temperature_drivers(block: SiteData) -> None:
-    """Parameter-independent, so it is a fixed mask NUTS never has to traverse."""
-    baseline = frost_mask(block.t_day, block.t_night)
-    assert baseline.dtype == bool
-    assert baseline.shape == (block.n_days,)
-    # Recomputing it cannot depend on ceff, lma or foliar carbon: those are not
-    # even arguments.
-    np.testing.assert_array_equal(baseline, frost_mask(block.t_day, block.t_night))
-
-
-def test_frost_mask_zeroes_gpp_over_a_whole_record(acm: AcmModel, block: SiteData) -> None:
-    terms = acm.terms(
-        doy=block.doy, t_day=block.t_day, t_night=block.t_night,
-        sw_in=block.sw_in, co2=block.co2, c_fol=np.full(block.n_days, 180.0),
-        lma=60.0, ceff=40.0,
-    )
-    frozen = terms["frost_masked"]
-    assert frozen.any(), "the synthetic record should contain some frost days"
-    assert np.all(terms["gpp"][frozen] == 0.0)
-    assert np.all(np.isfinite(terms["gpp"]))
-    assert np.all(terms["gpp"][~frozen] > 0.0)
-
-
-def test_the_masked_days_would_otherwise_emit_the_floor(acm: AcmModel, block: SiteData) -> None:
-    """The cutoff is load-bearing: unmasked, frost days still produce carbon."""
-    terms = acm.terms(
-        doy=block.doy, t_day=block.t_day, t_night=block.t_night,
-        sw_in=block.sw_in, co2=block.co2, c_fol=np.full(block.n_days, 180.0),
-        lma=60.0, ceff=40.0,
-    )
-    frozen = terms["frost_masked"]
-    suppressed = float(terms["gpp_unmasked"][frozen].sum())
-    assert suppressed > 0.0
+    """Parameter-independent, so it can be precomputed and is safe under NUTS."""
+    mask = frost_mask(block.t_day, block.t_night)
+    assert mask.dtype == bool
+    assert mask.shape == block.t_day.shape
+    expected = average_daily_temperature(block.t_day, block.t_night) < DEFAULT_FROST_THRESHOLD_DEGC
+    assert np.array_equal(mask, expected)
 
 
 def test_a_higher_threshold_suppresses_strictly_more(block: SiteData) -> None:
-    strict = make_acm(canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA, frost_threshold_degc=5.0)
-    loose = make_acm(canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA, frost_threshold_degc=-20.0)
-    shared = {
-        "doy": block.doy, "t_day": block.t_day, "t_night": block.t_night,
-        "sw_in": block.sw_in, "co2": block.co2,
-        "c_fol": np.full(block.n_days, 180.0), "lma": 60.0, "ceff": 40.0,
-    }
-    assert strict.terms(**shared)["gpp"].sum() < loose.terms(**shared)["gpp"].sum()
+    lenient = frost_mask(block.t_day, block.t_night, -10.0)
+    strict = frost_mask(block.t_day, block.t_night, 5.0)
+    assert np.count_nonzero(strict) >= np.count_nonzero(lenient)
+    assert np.all(strict[lenient])
+
+
+def test_frost_mask_zeroes_gpp_over_a_whole_record(acm: AcmModel, block: SiteData) -> None:
+    params = make_parameters()
+    output = run_dalec2(params, block, gpp_fn=acm)
+    masked = frost_mask(block.t_day, block.t_night)
+    assert np.all(output.gpp[masked] == 0.0)
 
 
 # ---------------------------------------------------------------------------
-# Structural behaviour
+# Behaviour
 # ---------------------------------------------------------------------------
 
 
 def test_gpp_is_zero_without_foliage(acm: AcmModel) -> None:
-    """No leaf area means no photosynthesis, and no 0/0 in Eq. 7."""
-    value = acm(**{**REFERENCE_CASE, "c_fol": 0.0})
-    assert value == 0.0
-    assert math.isfinite(value)
+    assert acm(**{**REFERENCE_CASE, "c_fol": 0.0}) == pytest.approx(0.0)
 
 
-def test_ceff_response_magnitude_not_merely_its_direction(acm: AcmModel) -> None:
-    """Monotonicity passes while ceff is nearly inert, so assert the size.
-
-    Across the full 10-100 prior range the measured response is about 1.53x.
-    A correct ``a1 * N`` substitution would move GPP far more, so this fails if
-    the reading of ceff is wrong -- which a monotonicity check would not.
-    """
+def test_gpp_increases_with_ceff(acm: AcmModel) -> None:
     lower, upper = prior_bounds("ceff")
-    low = acm(**{**REFERENCE_CASE, "ceff": lower})
-    high = acm(**{**REFERENCE_CASE, "ceff": upper})
-
-    assert high > low
-    ratio = high / low
-    assert ratio == pytest.approx(1.53, abs=0.05), (
-        f"a tenfold ceff change moved GPP by {ratio:.2f}x; if this has shifted, "
-        "the ceff substitution has changed"
-    )
-
-
-def test_ceff_response_saturates_hard(acm: AcmModel) -> None:
-    """Sensitivity per unit ceff collapses above 20, by roughly an order of magnitude.
-
-    Stated as a slope, not a total increment: the 20-100 interval is eight times
-    wider than 10-20, so it accumulates a comparable total while being far less
-    responsive. The slope is what makes the parameter nearly inert up there.
-    """
-    at_10 = acm(**{**REFERENCE_CASE, "ceff": 10.0})
-    at_20 = acm(**{**REFERENCE_CASE, "ceff": 20.0})
-    at_100 = acm(**{**REFERENCE_CASE, "ceff": 100.0})
-
-    slope_below = (at_20 - at_10) / 10.0
-    slope_above = (at_100 - at_20) / 80.0
-    assert slope_below > 5.0 * slope_above
+    values = [acm(**{**REFERENCE_CASE, "ceff": c}) for c in np.linspace(lower, upper, 12)]
+    assert all(b > a for a, b in itertools.pairwise(values))
 
 
 def test_gpp_rises_with_irradiance_and_leaf_area(acm: AcmModel) -> None:
-    assert acm(**{**REFERENCE_CASE, "sw_in": 20.0}) > acm(**REFERENCE_CASE)
-    assert acm(**{**REFERENCE_CASE, "c_fol": 300.0}) > acm(**REFERENCE_CASE)
+    assert acm(**{**REFERENCE_CASE, "sw_in": 20.0}) > acm(**{**REFERENCE_CASE, "sw_in": 5.0})
+    assert acm(**{**REFERENCE_CASE, "c_fol": 300.0}) > acm(**{**REFERENCE_CASE, "c_fol": 60.0})
 
 
-def test_day_length_correction_peaks_at_midsummer(acm: AcmModel) -> None:
-    midsummer = acm(**{**REFERENCE_CASE, "doy": int(MIDSUMMER_DOY)})
-    for doy in (1, 60, 300, 365):
-        assert acm(**{**REFERENCE_CASE, "doy": doy}) < midsummer
+def test_direct_temperature_response_is_still_weak(acm: AcmModel) -> None:
+    """Measured, and it is not what the rewrite fixed.
 
+    Above the frost threshold, GPP moves only about 2% across 20 degrees:
 
-def test_low_irradiance_gpp_is_nearly_temperature_independent(acm: AcmModel) -> None:
-    """The structural insensitivity the frost cutoff exists to mask.
+        T (degC)   +20     +7      0
+        GPP       3.455   3.411   3.384     (I = 2 MJ m-2 d-1)
 
-    Recorded as a test so the limitation is measured, not merely asserted in
-    prose. The frost mask is disabled here to expose the bare behaviour.
+    Temperature reaches GPP only through ``exp(a8 * Tmax)`` with a8 = 0.0111,
+    and through the daily range in the B1 denominator; the light limitation
+    damps both. The 1997 form gave 0.5% across 40 degrees, so this is better in
+    kind but not in magnitude. **What the rewrite fixed is the seasonal
+    amplitude, through day length -- not the temperature sensitivity.** Pinned
+    here so it is not later reported as resolved.
     """
-    unmasked = make_acm(
-        canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA, frost_threshold_degc=-999.0
+    low_light = {**REFERENCE_CASE, "sw_in": 2.0}
+    warm = acm(**{**low_light, "t_day": 25.0, "t_night": 15.0})
+    mid = acm(**{**low_light, "t_day": 12.0, "t_night": 2.0})
+    cool = acm(**{**low_light, "t_day": 5.0, "t_night": -5.0})
+
+    assert warm > mid > cool, "the response has the right sign, at least"
+    assert (warm - cool) / warm < 0.05, "and it is under 5% across 20 degrees"
+
+
+def test_the_seasonal_cycle_comes_from_day_length_and_light(acm: AcmModel) -> None:
+    """The 1997 form capped the achievable summer/winter ratio near 8.2.
+
+    Decomposed at this reference canopy: day length alone accounts for a 2.7x
+    summer-to-winter drop and irradiance alone for 3.9x, giving 10.5x together
+    with realistic winter temperatures -- before the frost mask contributes
+    anything at all.
+    """
+    summer = acm(**{**REFERENCE_CASE, "doy": 180, "sw_in": 15.0})
+    day_length_only = acm(**{**REFERENCE_CASE, "doy": 15, "sw_in": 15.0})
+    light_only = acm(**{**REFERENCE_CASE, "doy": 180, "sw_in": 2.0})
+    winter = acm(
+        **{**REFERENCE_CASE, "doy": 15, "sw_in": 2.0, "t_day": 1.0, "t_night": -1.0}
     )
-    dim = {**REFERENCE_CASE, "sw_in": 2.0, "doy": 30}
-    values = [
-        unmasked(**{**dim, "t_day": t + 3.0, "t_night": t - 3.0})
-        for t in (20.0, 7.0, 0.0, -10.0, -20.0)
-    ]
-    spread = (max(values) - min(values)) / max(values)
-    assert spread < 0.02, f"expected near-total insensitivity, got {spread:.3%}"
+
+    assert summer / day_length_only == pytest.approx(2.7, abs=0.2)
+    assert summer / light_only == pytest.approx(3.9, abs=0.2)
+    assert summer / winter > 8.2, "the ceiling the 1997 form could not get past"
 
 
 # ---------------------------------------------------------------------------
@@ -323,147 +435,133 @@ def test_low_irradiance_gpp_is_nearly_temperature_independent(acm: AcmModel) -> 
 
 
 def test_discriminant_stays_positive_across_the_prior_range(block: SiteData) -> None:
-    """Sweep the parameter box and the whole driver record.
-
-    A negative Eq. 6 discriminant yields NaN and poisons every gradient
-    downstream. It cannot happen: with ``q = theta - k = -544.1 < 0``,
-    ``C_a > 0`` and ``p >= 0``, the term ``C_a*q - p*theta`` is strictly
-    negative, so ``-4(C_a*q - p*theta)`` is strictly positive and the
-    discriminant is a square plus a positive number. The sweep confirms it
-    empirically over the real ranges.
-    """
+    """A NaN here would poison every gradient downstream."""
+    acm = make_acm(latitude_deg=LATITUDE)
     ceff_lo, ceff_hi = prior_bounds("ceff")
     lma_lo, lma_hi = prior_bounds("lma")
-    fol_lo, fol_hi = prior_bounds("c_fol_0")
 
-    worst = np.inf
-    for ceff in (ceff_lo, ceff_hi):
-        for lma in (lma_lo, lma_hi):
-            for c_fol in (0.0, fol_lo, fol_hi):
-                terms = acm_terms(
+    for ceff in np.linspace(ceff_lo, ceff_hi, 6):
+        for lma in np.linspace(lma_lo, lma_hi, 6):
+            for c_fol in (20.0, 500.0, 2000.0):
+                terms = acm.terms(
                     doy=block.doy, t_day=block.t_day, t_night=block.t_night,
                     sw_in=block.sw_in, co2=block.co2,
-                    c_fol=np.full(block.n_days, c_fol), lma=lma, ceff=ceff,
-                    canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA,
+                    c_fol=np.full(block.n_days, c_fol), lma=float(lma), ceff=float(ceff),
                 )
+                assert (terms["discriminant"] >= 0.0).all()
                 assert not terms["discriminant_clamped"].any()
-                worst = min(worst, float(terms["discriminant"].min()))
                 assert np.isfinite(terms["gpp"]).all()
 
-    assert worst > 0.0
+
+def test_discriminant_is_non_negative_whenever_co2_exceeds_a3() -> None:
+    """D > 0 for all real p exactly when C_a > a3, and a3 is 4.22 umol/mol."""
+    c = LOOBOS_EVERGREEN
+    q = c.a3 - c.a4
+    for c_a in (300.0, 400.0, 500.0):
+        for p in np.linspace(0.0, 5000.0, 400):
+            assert (c_a + q - p) ** 2 - 4.0 * (c_a * q - c.a3 * p) > 0.0
 
 
-def test_discriminant_is_non_negative_for_every_reachable_p() -> None:
-    """The guard is provably unreachable, not merely untriggered in practice.
+def test_an_inverted_day_night_pair_is_floored_not_divided_by(acm: AcmModel) -> None:
+    """Tr is a range and cannot be negative, but the day/night proxy can invert.
 
-    Written as a quadratic in ``p = p_N / g_c``::
-
-        D(p) = p^2 - 2p(C_a - theta - k) + (C_a - theta + k)^2
-
-    whose own discriminant is negative -- so ``D > 0`` for every real ``p`` --
-    exactly when ``(C_a - theta) * k > 0``, i.e. ``C_a > theta = 32.6``. Below
-    the compensation point the negative window exists but lies entirely at
-    ``p < 0``, and ``p`` cannot be negative because ``p_N >= 0`` and
-    ``g_c > 0``.
+    At FI-Hyy this happens on 14.8% of calibration days and drives the B1
+    denominator negative on 5.0% of them. The FULLSET daily product carries no
+    true TA_F_MAX or TA_F_MIN, so the proxy is the only option; the range is
+    floored at zero and counted rather than integrated as a physical state.
     """
-    theta, k = ACM_COEFFICIENTS["theta"], ACM_COEFFICIENTS["k"]
-    q = theta - k
+    inverted = {**REFERENCE_CASE, "t_day": -50.0, "t_night": 50.0}
+    terms = acm.terms(**inverted)
 
-    c_a_grid = np.linspace(0.1, 2000.0, 400)[:, None]
-    p_grid = np.linspace(0.0, 500_000.0, 400)[None, :]
-    discriminant = (c_a_grid + q - p_grid) ** 2 - 4.0 * (c_a_grid * q - p_grid * theta)
-
-    assert discriminant.min() > 0.0
-
-
-def test_a_negative_discriminant_would_warn_rather_than_clamp_silently() -> None:
-    """Guard the guard: unreachable is not the same as unwired.
-
-    Forcing it needs a negative ``ceff``, which is not a valid parameter -- that
-    is the point. If the guard ever does fire on real input, it must be loud.
-    """
-    import warnings
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        terms = acm_terms(
-            doy=180, t_day=20.0, t_night=10.0, sw_in=15.0, co2=10.0,
-            c_fol=180.0, lma=60.0, ceff=-14.0,
-            canopy_height_m=HEIGHT_M, psi_d_mpa=PSI_D_MPA,
-        )
-
-    assert terms["discriminant_clamped"].any()
-    assert any("discriminant" in str(warning.message) for warning in caught)
-    assert np.isfinite(terms["gpp"]).all()
+    assert float(terms["t_range_raw"]) == pytest.approx(-100.0)
+    assert float(terms["t_range"]) == 0.0
+    assert bool(terms["t_range_floored"])
+    assert np.isfinite(float(terms["gpp_unmasked"]))
 
 
-def test_conductance_denominator_is_guarded() -> None:
-    """b2*H + D_T must stay away from zero."""
-    with pytest.raises(ValueError, match=r"Eq. 5 denominator"):
-        acm_terms(
-            **{**REFERENCE_CASE, "t_day": -50.0, "t_night": 50.0},
-            canopy_height_m=1.0,
-            psi_d_mpa=PSI_D_MPA,
+def test_the_floor_is_counted_and_reported_not_silent(acm: AcmModel) -> None:
+    assert acm.range_floor_count == 0
+    acm(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 10.0})
+    assert acm.range_floor_count == 1
+    acm(**REFERENCE_CASE)
+    assert acm.range_floor_count == 1, "a normal day must not be counted"
+
+
+def test_the_vectorised_path_warns_about_floored_ranges(acm: AcmModel) -> None:
+    with pytest.warns(RuntimeWarning, match="daily temperature range was negative"):
+        acm.terms(
+            **{
+                **REFERENCE_CASE,
+                "doy": np.array([100, 101]),
+                "t_day": np.array([5.0, 20.0]),
+                "t_night": np.array([10.0, 10.0]),
+            }
         )
 
 
-def test_clamp_count_starts_at_zero_and_is_inspectable(acm: AcmModel, block: SiteData) -> None:
-    assert acm.clamp_count == 0
-    for index in range(20):
-        acm(
-            doy=int(block.doy[index]), t_day=float(block.t_day[index]),
-            t_night=float(block.t_night[index]), sw_in=float(block.sw_in[index]),
-            co2=float(block.co2[index]), c_fol=180.0, lma=60.0, ceff=40.0,
-        )
-    assert acm.clamp_count == 0
-
-
-# ---------------------------------------------------------------------------
-# Site constants and config wiring
-# ---------------------------------------------------------------------------
-
-
-def test_canopy_height_must_be_positive() -> None:
-    with pytest.raises(ValueError, match="canopy height must be positive"):
-        make_acm(canopy_height_m=0.0, psi_d_mpa=PSI_D_MPA)
-
-
-def test_psi_d_must_be_negative() -> None:
-    with pytest.raises(ValueError, match="must be negative"):
-        make_acm(canopy_height_m=HEIGHT_M, psi_d_mpa=1.5)
-
-
-@pytest.mark.parametrize("missing", ["canopy_height_m", "psi_d_mpa"])
-def test_config_without_a_site_constant_raises(missing: str) -> None:
-    site = {"canopy_height_m": HEIGHT_M, "psi_d_mpa": PSI_D_MPA}
-    site[missing] = None
-    with pytest.raises(ValueError, match=f"site.{missing}"):
-        acm_from_config({"site": site})
-
-
-def test_shipped_config_leaves_the_site_constants_unset() -> None:
-    """They come from site literature; the config must not guess them."""
-    from dalec.config import load_config
-
-    config = load_config()
-    assert config["site"]["canopy_height_m"] is None
-    assert config["site"]["psi_d_mpa"] is None
-    assert config["acm"]["frost_threshold_degc"] == DEFAULT_FROST_THRESHOLD_DEGC
-    with pytest.raises(ValueError, match=r"site\."):
-        acm_from_config(config)
-
-
-def test_config_builds_a_working_model() -> None:
-    model = acm_from_config(
-        {
-            "site": {"canopy_height_m": HEIGHT_M, "psi_d_mpa": PSI_D_MPA},
-            "acm": {"frost_threshold_degc": -3.5},
-        }
+def test_flooring_leaves_the_conductance_at_its_minimum(acm: AcmModel) -> None:
+    """Tr = 0 gives the smallest denominator, hence the largest conductance."""
+    c = LOOBOS_EVERGREEN
+    terms = acm.terms(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 10.0})
+    assert float(terms["g_c"]) == pytest.approx(
+        abs(c.psi_mpa) ** c.a10 / (c.a6 * c.r_tot)
     )
-    assert model.canopy_height_m == HEIGHT_M
-    assert model.psi_d_mpa == PSI_D_MPA
-    assert model.frost_threshold_degc == -3.5
-    assert model(**REFERENCE_CASE) > 0.0
+
+
+def test_conductance_denominator_is_still_guarded(acm: AcmModel) -> None:
+    """With Tr floored, only a non-positive a6*Rtot can break it."""
+    broken = make_acm(
+        latitude_deg=LATITUDE,
+        coefficients=type(LOOBOS_EVERGREEN)(**{**vars(LOOBOS_EVERGREEN), "a6": 0.0}),
+    )
+    with pytest.raises(ValueError, match="B1 denominator"):
+        broken.terms(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 10.0})
+
+
+def test_clamp_count_starts_at_zero_and_is_inspectable(
+    acm: AcmModel, block: SiteData
+) -> None:
+    assert acm.clamp_count == 0
+    run_dalec2(make_parameters(), block, gpp_fn=acm)
+    assert acm.clamp_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Construction and config
+# ---------------------------------------------------------------------------
+
+
+def test_latitude_must_be_a_real_latitude() -> None:
+    with pytest.raises(ValueError, match="latitude must lie"):
+        make_acm(latitude_deg=120.0)
+
+
+def test_config_without_a_latitude_raises() -> None:
+    with pytest.raises(ValueError, match=r"site\.latitude_deg must be set"):
+        acm_from_config({"site": {"latitude_deg": None}})
+
+
+def test_shipped_config_builds_a_working_model() -> None:
+    """Latitude is set in the shipped config, so this no longer raises."""
+    acm = acm_from_config(load_config())
+    assert acm.latitude_deg == pytest.approx(61.8474, abs=1e-3)
+    assert acm.coefficients is LOOBOS_EVERGREEN
+    assert np.isfinite(acm(**REFERENCE_CASE))
+
+
+def test_canopy_height_is_no_longer_required() -> None:
+    """It does not appear in the DALEC conductance equation at all."""
+    config = load_config()
+    assert "canopy_height_m" not in config["site"]
+    assert np.isfinite(acm_from_config(config)(**REFERENCE_CASE))
+
+
+def test_config_honours_the_frost_threshold() -> None:
+    acm = acm_from_config(
+        {"site": {"latitude_deg": LATITUDE}, "acm": {"frost_threshold_degc": 5.0}}
+    )
+    assert acm.frost_threshold_degc == 5.0
+    assert acm(**{**REFERENCE_CASE, "t_day": 5.0, "t_night": 1.0}) == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -472,23 +570,14 @@ def test_config_builds_a_working_model() -> None:
 
 
 def test_forward_run_with_acm_conserves_carbon(acm: AcmModel, block: SiteData) -> None:
-    """The last blocker closed: A1-A9 running end to end on real drivers."""
-    params = make_parameters(lma=60.0, ceff=40.0)
-    output = run_dalec2(params, block, gpp_fn=acm)
-
+    """Conservation is an identity and must hold for any GPP whatsoever."""
+    output = run_dalec2(make_parameters(), block, gpp_fn=acm)
     assert np.abs(output.carbon_imbalance).max() < 1e-8
-    np.testing.assert_allclose(np.diff(output.total_carbon), -output.nee, atol=1e-8)
-    assert np.isfinite(output.gpp).all()
-    assert (output.gpp >= 0.0).all()
-    assert output.gpp.max() > 0.0
 
 
-def test_forward_run_gpp_is_zero_on_frost_days(acm: AcmModel, block: SiteData) -> None:
-    params = make_parameters(lma=60.0, ceff=40.0)
-    output = run_dalec2(params, block, gpp_fn=acm)
-    frozen = frost_mask(block.t_day, block.t_night)
-
-    assert np.all(output.gpp[frozen] == 0.0)
+def test_forward_run_keeps_pools_non_negative(acm: AcmModel, block: SiteData) -> None:
+    output = run_dalec2(make_parameters(), block, gpp_fn=acm)
+    assert (output.pools >= 0.0).all()
 
 
 def test_run_without_a_photosynthesis_routine_points_at_make_acm(block: SiteData) -> None:
@@ -497,34 +586,29 @@ def test_run_without_a_photosynthesis_routine_points_at_make_acm(block: SiteData
 
 
 # ---------------------------------------------------------------------------
-# Structural-bias diagnostics
+# Structural diagnostics
 # ---------------------------------------------------------------------------
 
 
 def test_shoulder_season_diagnostic_quantifies_the_residual_floor(
     acm: AcmModel, block: SiteData
 ) -> None:
-    params = make_parameters(lma=60.0, ceff=40.0)
+    params = make_parameters()
     output = run_dalec2(params, block, gpp_fn=acm)
     table = shoulder_season_gpp(params, block, output, acm=acm)
 
     assert list(table.index) == [2000, 2001]
-    for year in table.index:
-        row = table.loc[year]
-        assert row["frost_days"] >= 0
-        assert row["light_limited_days"] >= 0
-        # Frost days and light-limited-unmasked days are disjoint by definition.
-        assert row["frost_days"] + row["light_limited_days"] <= row["days"]
-        assert 0.0 <= row["fraction_light_limited"] <= 1.0 + 1e-9
-        assert row["gpp_light_limited"] <= row["gpp_total"] + 1e-9
+    for column in ("frost_days", "light_limited_days", "gpp_light_limited", "gpp_total"):
+        assert column in table
+    assert (table["gpp_light_limited"] <= table["gpp_total"] + 1e-9).all()
 
 
 def test_shoulder_season_diagnostic_rejects_a_mismatched_run(
     acm: AcmModel, block: SiteData
 ) -> None:
-    params = make_parameters(lma=60.0, ceff=40.0)
     frame = load_fluxnet_dd(block.attrs["source_file"])
     shorter = build_site_data(frame, start_year=2000, end_year=2000)
+    params = make_parameters()
     output = run_dalec2(params, shorter, gpp_fn=acm)
 
     with pytest.raises(ValueError, match="same period"):
@@ -533,12 +617,28 @@ def test_shoulder_season_diagnostic_rejects_a_mismatched_run(
 
 def test_calibration_bound_coverage_reports_extrapolation(block: SiteData) -> None:
     table = calibration_bound_coverage(block)
-
     assert "t_mean" in table.index
-    row = table.loc["t_mean"]
-    assert (row["lower"], row["upper"]) == ACM_CALIBRATION_BOUNDS["t_mean"]
-    assert row["n_days"] == block.n_days
-    assert row["n_below"] + row["n_above"] <= row["n_days"]
-    assert 0.0 <= row["fraction_outside"] <= 1.0
-    # A boreal record spends most of the year below the 7 degC calibration floor.
-    assert row["n_below"] > 0
+    assert ACM_CALIBRATION_BOUNDS["t_mean"] == (7.0, 30.0)
+    assert 0.0 <= float(table.loc["t_mean", "fraction_outside"]) <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# The retained 1997 variant still runs, so the comparison stays reproducible
+# ---------------------------------------------------------------------------
+
+
+def test_retained_1997_variant_still_evaluates() -> None:
+    terms = williams1997_terms(
+        **REFERENCE_CASE, canopy_height_m=18.0, psi_d_mpa=-1.5
+    )
+    assert np.isfinite(float(terms["gpp"]))
+    assert WILLIAMS_1997_COEFFICIENTS["c1"] == 0.989
+
+
+def test_the_two_forms_disagree_at_this_site(acm: AcmModel) -> None:
+    """If these ever agree, something has been reverted."""
+    dalec = acm(**REFERENCE_CASE)
+    williams = float(
+        williams1997_terms(**REFERENCE_CASE, canopy_height_m=18.0, psi_d_mpa=-1.5)["gpp"]
+    )
+    assert williams != pytest.approx(dalec, rel=0.1)

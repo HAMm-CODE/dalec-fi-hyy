@@ -49,11 +49,11 @@ Note that ``theta_min`` moves carbon from litter to soil and is therefore a
 Photosynthesis
 --------------
 ``F_gpp`` is injected rather than imported, because the Aggregated Canopy Model
-needs two fixed site constants that are neither DALEC2 parameters nor drivers.
-Build it with ``dalec.acm.make_acm(...)`` or ``dalec.acm.acm_from_config(...)``
-and pass it as ``gpp_fn=``; the default refuses to run. A test double may be
-passed instead to exercise A1-A8 on their own -- carbon conservation holds for
-*any* value ``F_gpp`` returns.
+needs a fixed site constant -- latitude -- that is neither a DALEC2 parameter nor
+a driver. Build it with ``dalec.acm.make_acm(...)`` or
+``dalec.acm.acm_from_config(...)`` and pass it as ``gpp_fn=``; the default
+refuses to run. A test double may be passed instead to exercise A1-A8 on their
+own -- carbon conservation holds for *any* value ``F_gpp`` returns.
 """
 
 from __future__ import annotations
@@ -217,18 +217,17 @@ def gpp_not_implemented(
 ) -> float:
     """Default ``gpp_fn``: refuses to run rather than inventing photosynthesis.
 
-    ACM is implemented in ``dalec.acm``, but it needs two fixed site constants
-    -- canopy height and leaf-to-soil water potential difference -- that are
-    neither DALEC2 parameters nor drivers, and so cannot travel through this
-    per-day signature. Build the real routine with
-    ``dalec.acm.make_acm(canopy_height_m=..., psi_d_mpa=...)`` or
+    ACM is implemented in ``dalec.acm``, but it needs a fixed site constant --
+    latitude, which sets day length -- that is neither a DALEC2 parameter nor a
+    driver, and so cannot travel through this per-day signature. Build the real
+    routine with ``dalec.acm.make_acm(latitude_deg=...)`` or
     ``dalec.acm.acm_from_config(config)`` and pass it as ``gpp_fn=``.
     """
     raise NotImplementedError(
         "no photosynthesis routine was supplied. Pass the Aggregated Canopy "
-        "Model via gpp_fn=dalec.acm.make_acm(canopy_height_m=..., psi_d_mpa=...), "
-        "or acm_from_config(config); both site constants are required and have "
-        "no defaults. A test double may be passed instead to exercise A1-A8 alone."
+        "Model via gpp_fn=dalec.acm.make_acm(latitude_deg=...), or "
+        "acm_from_config(config); latitude is required and has no default. A "
+        "test double may be passed instead to exercise A1-A8 alone."
     )
 
 

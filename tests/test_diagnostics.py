@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -209,3 +210,94 @@ def test_report_is_readable_and_states_what_the_products_are(block: SiteData) ->
     assert "never assimilated" in report
     assert "matched days" in report
     assert "2000" in report and "2001" in report
+
+
+# ---------------------------------------------------------------------------
+# Canopy density check
+#
+# The GPP ratio is dominated by LAI rather than by ceff, so a gate reporting
+# only the ratio could be made to pass or fail by the parameter set handed to
+# it. These pin the second, independent check.
+# ---------------------------------------------------------------------------
+
+
+def test_gate_reports_the_lai_trajectory(block: SiteData) -> None:
+    params = make_parameters()
+    gate = gpp_magnitude_gate(params, block, gpp_fn=saturating_gpp(WELL_SCALED))
+
+    expected = (
+        run_dalec2(
+            replace(params, ceff=gate.best_ceff), block, gpp_fn=saturating_gpp(WELL_SCALED)
+        ).pool("c_fol")[:-1]
+        / params.lma
+    )
+    assert gate.lai_min == pytest.approx(expected.min())
+    assert gate.lai_mean == pytest.approx(expected.mean())
+    assert gate.lai_max == pytest.approx(expected.max())
+    assert gate.lai_end == pytest.approx(expected[-1])
+
+
+def test_lai_appears_in_the_report(block: SiteData) -> None:
+    gate = gpp_magnitude_gate(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    report = format_gpp_magnitude_report(gate)
+
+    assert "LAI at best ceff" in report
+    assert "plausible band" in report
+    assert "lai_mean" in report and "lai_max" in report  # the sweep columns
+
+
+def test_implausible_lai_fails_the_gate_even_when_the_ratio_is_fine(
+    block: SiteData,
+) -> None:
+    """The two checks are independent, and the ratio one still passes here."""
+    gate = gpp_magnitude_gate(
+        make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED), lai_band=(50.0, 60.0)
+    )
+
+    assert gate.ratio_ok, "the GPP ratio itself is still within tolerance"
+    assert not gate.lai_ok
+    assert not gate.passed
+
+
+def test_the_two_failures_read_differently(block: SiteData) -> None:
+    # Each failure is isolated deliberately. Five times too much GPP also grows
+    # the canopy out of any plausible band -- which is the coupling this check
+    # exists to expose -- so the band is widened here to leave only the ratio
+    # failing, and the LAI case below is scaled correctly and fails on the band
+    # alone.
+    ratio_failure = format_gpp_magnitude_report(
+        gpp_magnitude_gate(
+            make_parameters(), block, gpp_fn=saturating_gpp(5 * WELL_SCALED),
+            lai_band=(0.1, 100.0),
+        )
+    )
+    lai_failure = format_gpp_magnitude_report(
+        gpp_magnitude_gate(
+            make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED),
+            lai_band=(50.0, 60.0),
+        )
+    )
+
+    assert "GPP ratio failed." in ratio_failure
+    assert "Canopy density failed" not in ratio_failure
+
+    assert "Canopy density failed" in lai_failure
+    assert "says nothing about ACM" in lai_failure
+    assert "GPP ratio failed." not in lai_failure
+    assert "DO NOT PROCEED" in lai_failure
+
+
+def test_gate_rejects_a_meaningless_lai_band(block: SiteData) -> None:
+    with pytest.raises(ValueError, match="positive and increasing"):
+        gpp_magnitude_gate(
+            make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED), lai_band=(8.0, 1.0)
+        )
+
+
+def test_sweep_carries_lai_alongside_gpp(block: SiteData) -> None:
+    sweep = canopy_efficiency_sweep(
+        make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED)
+    )
+
+    assert (sweep["lai_max"] >= sweep["lai_mean"]).all()
+    assert (sweep["lai_mean"] > 0.0).all()

@@ -214,53 +214,84 @@ plausible-looking numbers.
 
 ### Photosynthesis
 
-ACM (Williams et al. 1997) is complete, solve order **2-5-6-4-8-7-9** — Eq. 7
-consumes `E_0` from Eq. 8, so 8 must run first. `ceff` replaces the `a1·N`
-product; Eq. 3 is folded into Eq. 6 by the steady-state assumption.
+ACM is implemented from **Chuter et al. (2015)**, which writes the model out as
+DALEC actually implements it. It is *not* the Williams et al. (1997) form that
+Bloom & Williams cite, and the difference is material.
 
-`F_gpp` stays **injected** rather than imported, because ACM needs two fixed
-site constants that are neither DALEC2 parameters nor drivers:
-`site.canopy_height_m` and `site.psi_d_mpa`. Both are **required with no
-defaults** — `acm_from_config()` raises rather than guessing. Build the routine
-with `make_acm(...)` or `acm_from_config(config)` and pass it as `gpp_fn=`.
+> **⚠ The source was wrong, and the symptoms were all downstream of that.** The
+> 1997 day-length term, `d1·|173 − doy| + d2`, **contains no latitude**. DALEC
+> computes true day length from latitude and solar declination. At 61.85 N the
+> 1997 form overstates that factor by 5.3× at midsummer and **12.1× in January**,
+> which is where the winter GPP floor, the several-fold annual overestimate and
+> the apparent `ceff` mismatch all came from. Two further differences: canopy
+> conductance carries no canopy height, and quantum yield is 6.5× larger. The
+> first and third roughly cancel at mid-latitude, which is why this stayed
+> invisible until the model was run at a boreal site.
+
+The 1997 implementation is retained in [acm.py](src/dalec/acm.py), renamed and
+marked, as thesis material — not as a code path. A regression test reproduces the
+overstatement table so reverting cannot pass silently.
+
+Coefficients are **site-calibrated, not universal**. Chuter publishes two
+complete and materially different sets; the Loobos evergreen set (52 N) is used
+as the closest available match by forest type, and **neither set is boreal**.
+That adoption is a stated limitation.
+
+`F_gpp` stays **injected** rather than imported, because ACM needs one fixed site
+constant that is neither a DALEC2 parameter nor a driver: `site.latitude_deg`.
+It is **required with no default** — `acm_from_config()` raises rather than
+guessing. Build the routine with `make_acm(latitude_deg=...)` or
+`acm_from_config(config)` and pass it as `gpp_fn=`.
 
 The **frost cutoff** (−2 °C, `acm.frost_threshold_degc`) reads only temperature
 drivers, so it is a fixed boolean mask over the time series — parameter-
 independent, safe to precompute, and no branch enters the gradient graph. It is
-applied *after* Eq. 9 so the arithmetic always runs on finite values.
+applied last so the arithmetic always runs on finite values. It was previously
+described as load-bearing; that rested on measurements made against the wrong
+day-length term, and under the corrected form it no longer carries that weight.
 
-> **⚠ The frost cutoff is load-bearing, not cleanup.** Sweeping LAI and `ceff`
-> across their full prior ranges yields *zero* combinations with a realistic
-> summer peak and a small winter floor; the achievable summer/winter ratio is
-> structurally capped near 8 against an effectively unbounded true ratio. The
-> cutoff is the only mechanism available to suppress a temperature-independent
-> floor worth ~970 g C m⁻² yr⁻¹. Do not raise it towards zero or disable it.
+The **daily temperature range is floored at zero**, counted and warned. `Tr` is a
+range and cannot be negative, but the day/night means standing in for maximum and
+minimum invert on **14.8%** of calibration days. The FULLSET daily product
+carries no `TA_F_MAX` or `TA_F_MIN`, so the proxy is the only option available.
 
 ### GPP magnitude gate
 
 A hard pre-calibration check lives in
-[diagnostics.py](src/dalec/diagnostics.py). Once ACM is wired in,
-`gpp_magnitude_gate()` sweeps `ceff` across its prior range and compares annual
-modelled GPP against `GPP_NT_VUT_REF` and `GPP_DT_VUT_REF`. **If no `ceff`
-brings the ratio within a factor of 1.5, calibration must not proceed** — a
-forward model several-fold wrong on total GPP still converges and still yields
-a posterior, and that posterior is meaningless.
+[diagnostics.py](src/dalec/diagnostics.py). `gpp_magnitude_gate()` sweeps `ceff`
+across its prior range and compares annual modelled GPP against
+`GPP_NT_VUT_REF` and `GPP_DT_VUT_REF`. **If no `ceff` brings the ratio within a
+factor of 1.5, calibration must not proceed** — a forward model several-fold
+wrong on total GPP still converges and still yields a posterior, and that
+posterior is meaningless.
 
 Ratios are computed on **matched days only**, so a gappy product cannot inflate
-them. The partitioned products remain a magnitude sanity check, never
-validation and never assimilated.
+them. The partitioned products remain a magnitude sanity check, never validation
+and never assimilated.
 
-Two further structural diagnostics sit alongside it:
-`shoulder_season_gpp()` measures how much GPP comes from days the frost mask
-misses but where ACM is still light-limited and therefore temperature-blind,
-and `calibration_bound_coverage()` reports what fraction of the driver record
-falls outside ACM's Table 1 calibration bounds.
+The gate also checks **canopy density independently of the ratio**, and fails
+with a distinct message if modelled LAI leaves a plausible band (default 1–8).
+The reason is measured: with LAI pinned artificially the ratio runs 0.87 at
+LAI 1, 1.91 at LAI 3 and 3.10 at LAI 15.4, so a gate reporting only the ratio
+could be made to pass or fail at will by the parameter set handed to it.
 
-Known ACM problems, all measured and recorded in [acm.py](src/dalec/acm.py):
-annual GPP several-fold too high; near-total temperature insensitivity wherever
-the light limitation dominates (0.5% across a 40 °C swing, because `T` drops
-out of that branch entirely); no parameter combination that escapes it; and a
-`ceff` prior of 10–100 that barely overlaps the original `a1·N` value of ~5.7.
+Two further structural diagnostics sit alongside it: `shoulder_season_gpp()`
+measures how much GPP comes from days the frost mask misses but where ACM is
+still light-limited, and `calibration_bound_coverage()` reports what fraction of
+the driver record falls outside ACM's calibration bounds.
+
+**Status: the gate passes.** With the Loobos coefficients and LAI held near 3,
+the whole-record ratio reaches 1.0 at `ceff ≈ 11.5`, inside the published 10–100
+prior, and the canopy is stable at LAI 2.76–3.19 across all nine calibration
+years. Under the old ACM the ratio was 2.9–3.4 with LAI running to 22.8, and no
+`ceff` could fix it.
+
+**Known problems that remain**, measured and recorded in
+[acm.py](src/dalec/acm.py): the direct temperature response is still weak (~2%
+across 20 °C — the seasonal cycle is carried by day length and irradiance, not
+temperature); the coefficient sets are site-calibrated and neither is boreal; and
+Chuter's declination formula carries no phase offset, so it runs about ten days
+late.
 
 **Scope.** Bloom & Williams (2015) §2.5 selected sites with little water stress
 and at most **three months** of below-freezing soil temperature, those criteria
@@ -268,21 +299,26 @@ reflecting DALEC2's capabilities — hydrology is not explicitly represented.
 FI-Hyy has roughly **four to six months** of soil frost. Applying DALEC2 here is
 a deliberate scope decision, not an oversight.
 
-**Bearing on RQ3.** A GPP term insensitive to temperature over much of the year
-pushes seasonal structure onto the respiration parameters during calibration, so
-observed equifinality may be partly *structural* rather than informational. The
-Phase 7 synthetic twin separates the two — but only if it runs with the frost
-mask active over the same driver record.
+**Bearing on RQ3.** Under the 1997 form, a temperature-blind GPP term would have
+pushed seasonal structure onto the respiration parameters, making equifinality
+partly structural. The corrected day-length term restores a strong seasonal
+cycle, so that argument must be **re-measured, not carried over**. The Phase 7
+synthetic twin separates the two — but only if it runs with the frost mask
+active over the same driver record.
 
-Everything else is complete. Carbon conservation holds for *any* value `F_gpp`
-returns, so A1–A8 are fully testable with a double in its place.
+Carbon conservation holds for *any* value `F_gpp` returns, so A1–A8 are fully
+testable with a double in its place.
 
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics
   in a data-limited world. *Biogeosciences* 12, 1299–1315.
+- Chuter, A. M., Aston, P. J., Skeldon, A. C. and Roulstone, I. (2015). A
+  dynamical systems analysis of the data assimilation linked ecosystem carbon
+  (DALEC) models. *Chaos* 25(3), 036401. The ACM source actually used.
 - Williams, M. et al. (1997). Predicting gross primary productivity in
-  terrestrial ecosystems. *Ecological Applications* 7(3), 882–894.
+  terrestrial ecosystems. *Ecological Applications* 7(3), 882–894. Cited by
+  Bloom & Williams for ACM, but not the form DALEC implements.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C
   model with measurements of stocks and fluxes as joint constraints. *Oecologia*
   164, 25–40.

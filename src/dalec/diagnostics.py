@@ -27,6 +27,26 @@ both the model and the product are present. Summing a gappy product over a year
 and dividing by a complete modelled total would bias the ratio upward in
 proportion to the gaps, which is exactly the kind of quiet error this gate
 exists to catch.
+
+The gate checks LAI too, and for a reason
+-----------------------------------------
+The sweep varies ``ceff``, but the GPP ratio is dominated by canopy density,
+which the sweep holds at whatever the caller's parameter set implies. Measured
+over 1997-2005 with LAI pinned artificially: ratio 0.87 at LAI 1, 1.91 at LAI 3
+and 3.10 at LAI 15.4. So a gate that reported only the ratio could be made to
+pass or fail at will by the parameter set handed to it, and the reader would
+have no way to see that from the output.
+
+The mechanism is not ``E_0``, which saturates by LAI 3 and barely moves after.
+It is ``p_D``: at low LAI the model is diffusion-limited and ``ceff`` has real
+leverage, while at high LAI every day falls in the light-limited branch of
+Eq. 7, where GPP collapses to ``E_0 * I * (d1*D_ms + d2)`` and ``ceff`` does not
+appear at all. A ratio computed in that regime is not a statement about ACM.
+
+So :func:`gpp_magnitude_gate` reports the LAI trajectory alongside the ratio and
+fails independently, with a distinct message, when modelled LAI leaves a
+plausible band. Both failures are real; they mean different things and the
+report says which.
 """
 
 from __future__ import annotations
@@ -49,6 +69,7 @@ from dalec.model_numpy import (
 from dalec.parameters import DalecParameters, prior_bounds
 
 __all__ = [
+    "DEFAULT_LAI_BAND",
     "GppMagnitudeGate",
     "annual_gpp_comparison",
     "calibration_bound_coverage",
@@ -61,6 +82,21 @@ __all__ = [
 #: Partitioned products compared against. Consistency check only, never
 #: assimilated.
 _PRODUCTS: tuple[str, str] = ("gpp_nt", "gpp_dt")
+
+#: Plausible band for modelled projected LAI in a boreal conifer stand,
+#: dimensionless. Deliberately wide: this is a sanity band, not a target, and it
+#: must not quietly become a constraint on the posterior. FI-Hyy's projected LAI
+#: is around 3 (provisional, pending a SMEAR II citation).
+DEFAULT_LAI_BAND: tuple[float, float] = (1.0, 8.0)
+
+
+def _lai_trajectory(output: DalecOutput, params: DalecParameters) -> np.ndarray:
+    """Modelled projected LAI per timestep, dimensionless (Eq. A12).
+
+    Foliar carbon enters photosynthesis at its time-``t`` value, so the final
+    state is dropped: it has no corresponding timestep.
+    """
+    return output.pool("c_fol")[:-1] / params.lma
 
 
 def _matched_ratio(modelled: np.ndarray, observed: np.ndarray, mask: np.ndarray) -> float:
@@ -202,7 +238,10 @@ def canopy_efficiency_sweep(
     -------
     pandas.DataFrame
         Indexed by ``ceff``, with the whole-record ``gpp_model`` total, the
-        record ``ratio_ref``, and the mean per-year ``ratio_nt`` / ``ratio_dt``.
+        record ``ratio_ref``, the mean per-year ``ratio_nt`` / ``ratio_dt``, and
+        ``lai_mean`` / ``lai_max``. The LAI columns are there because canopy
+        density, not ``ceff``, is what usually moves the ratio -- reading the
+        sweep without them invites the wrong conclusion.
     """
     if ceff_values is None:
         lower, upper = prior_bounds("ceff")
@@ -213,6 +252,7 @@ def canopy_efficiency_sweep(
         swept = replace(params, ceff=float(ceff))
         output = run_dalec2(swept, site_data, gpp_fn=gpp_fn, phenology_fn=phenology_fn)
         table = annual_gpp_comparison(output, site_data)
+        lai = _lai_trajectory(output, swept)
         rows.append(
             {
                 "ceff": float(ceff),
@@ -220,6 +260,8 @@ def canopy_efficiency_sweep(
                 "ratio_ref": _record_ratio(table),
                 "ratio_nt": float(np.nanmean(table["ratio_nt"].to_numpy(dtype=float))),
                 "ratio_dt": float(np.nanmean(table["ratio_dt"].to_numpy(dtype=float))),
+                "lai_mean": float(lai.mean()),
+                "lai_max": float(lai.max()),
             }
         )
 
@@ -230,15 +272,31 @@ def canopy_efficiency_sweep(
 class GppMagnitudeGate:
     """Outcome of the pre-calibration GPP magnitude check.
 
+    Two independent checks, both of which must hold. ``passed`` is their
+    conjunction; read :attr:`ratio_ok` and :attr:`lai_ok` to see which failed,
+    because they mean different things.
+
     Attributes
     ----------
     passed
+        ``ratio_ok and lai_ok``. Callers must refuse to calibrate when False.
+    ratio_ok
         True when some ``ceff`` in the prior range brings the whole-record
         modelled/observed GPP ratio inside ``[1/tolerance, tolerance]``.
+    lai_ok
+        True when the modelled LAI trajectory at ``best_ceff`` stays inside
+        ``lai_band``. Checked independently of the ratio: a ratio computed at an
+        implausible canopy density is not a statement about ACM.
     tolerance
         Permitted multiplicative discrepancy.
     best_ceff, best_ratio
         The sweep point closest to a ratio of one, in log space.
+    lai_band
+        Plausible ``(lower, upper)`` band for projected LAI.
+    lai_min, lai_mean, lai_max, lai_end
+        Modelled LAI over the block at ``best_ceff``. ``lai_end`` is the last
+        timestep, which is what shows drift: a run that starts at a plausible
+        LAI and ends far outside the band tells you nothing about GPP.
     sweep
         Output of :func:`canopy_efficiency_sweep`.
     detail
@@ -246,9 +304,16 @@ class GppMagnitudeGate:
     """
 
     passed: bool
+    ratio_ok: bool
+    lai_ok: bool
     tolerance: float
     best_ceff: float
     best_ratio: float
+    lai_band: tuple[float, float]
+    lai_min: float
+    lai_mean: float
+    lai_max: float
+    lai_end: float
     sweep: pd.DataFrame
     detail: pd.DataFrame
 
@@ -261,6 +326,7 @@ def gpp_magnitude_gate(
     phenology_fn: PhenologyModel = dalec2_phenology,
     tolerance: float = 1.5,
     ceff_values: np.ndarray | None = None,
+    lai_band: tuple[float, float] = DEFAULT_LAI_BAND,
 ) -> GppMagnitudeGate:
     """Check that modelled annual GPP is the right order of magnitude.
 
@@ -268,15 +334,28 @@ def gpp_magnitude_gate(
     modelled annual GPP within a factor of ``tolerance`` of the partitioned
     products. Callers must refuse to calibrate when this returns ``passed=False``.
 
+    The modelled LAI trajectory is checked separately against ``lai_band`` and
+    reported either way. See the module docstring: the GPP ratio is dominated by
+    canopy density rather than by ``ceff``, so a ratio quoted without its LAI is
+    not interpretable.
+
+    Parameters
+    ----------
+    lai_band
+        Plausible ``(lower, upper)`` projected LAI. A sanity band, not a target.
+
     Raises
     ------
     ValueError
-        If ``tolerance`` is not greater than one, or the products are absent.
+        If ``tolerance`` is not greater than one, ``lai_band`` is not increasing
+        and positive, or the products are absent.
     NotImplementedError
         If ``gpp_fn`` is left at the default stub.
     """
     if tolerance <= 1.0:
         raise ValueError(f"tolerance must be greater than 1, got {tolerance!r}")
+    if not 0.0 < lai_band[0] < lai_band[1]:
+        raise ValueError(f"lai_band must be positive and increasing, got {lai_band!r}")
     _require_products(site_data)
 
     sweep = canopy_efficiency_sweep(
@@ -299,21 +378,29 @@ def gpp_magnitude_gate(
     best_ceff = float(sweep.index[best])
     best_ratio = float(ratios[best])
 
-    detail = annual_gpp_comparison(
-        run_dalec2(
-            replace(params, ceff=best_ceff),
-            site_data,
-            gpp_fn=gpp_fn,
-            phenology_fn=phenology_fn,
-        ),
-        site_data,
+    best_params = replace(params, ceff=best_ceff)
+    best_output = run_dalec2(
+        best_params, site_data, gpp_fn=gpp_fn, phenology_fn=phenology_fn
     )
+    detail = annual_gpp_comparison(best_output, site_data)
+
+    lai = _lai_trajectory(best_output, best_params)
+    lai_min, lai_max = float(lai.min()), float(lai.max())
+    ratio_ok = bool(1.0 / tolerance <= best_ratio <= tolerance)
+    lai_ok = bool(lai_band[0] <= lai_min and lai_max <= lai_band[1])
 
     return GppMagnitudeGate(
-        passed=bool(1.0 / tolerance <= best_ratio <= tolerance),
+        passed=ratio_ok and lai_ok,
+        ratio_ok=ratio_ok,
+        lai_ok=lai_ok,
         tolerance=tolerance,
         best_ceff=best_ceff,
         best_ratio=best_ratio,
+        lai_band=lai_band,
+        lai_min=lai_min,
+        lai_mean=float(lai.mean()),
+        lai_max=lai_max,
+        lai_end=float(lai[-1]),
         sweep=sweep,
         detail=detail,
     )
@@ -326,10 +413,17 @@ def format_gpp_magnitude_report(gate: GppMagnitudeGate) -> str:
         "=" * 78,
         f"  GPP magnitude gate: {verdict}",
         "=" * 78,
+        f"  GPP ratio          {'ok' if gate.ratio_ok else 'FAILED'}",
+        f"  canopy density     {'ok' if gate.lai_ok else 'FAILED'}",
+        "",
         f"  tolerance          factor of {gate.tolerance:g}",
         f"  best ceff          {gate.best_ceff:.3g}  (prior range "
         f"{prior_bounds('ceff')[0]:g}-{prior_bounds('ceff')[1]:g})",
         f"  best ratio         {gate.best_ratio:.3f}  (modelled / partitioned mean)",
+        "",
+        f"  LAI at best ceff   min {gate.lai_min:.2f}   mean {gate.lai_mean:.2f}   "
+        f"max {gate.lai_max:.2f}   end {gate.lai_end:.2f}",
+        f"  plausible band     {gate.lai_band[0]:g} to {gate.lai_band[1]:g}",
         "",
         "  Partitioned GPP products are a magnitude sanity check, not validation,",
         "  and are never assimilated. Ratios use matched days only.",
@@ -346,12 +440,25 @@ def format_gpp_magnitude_report(gate: GppMagnitudeGate) -> str:
         "",
     ]
     if not gate.passed:
+        lines += ["  DO NOT PROCEED TO CALIBRATION.", ""]
+    if not gate.ratio_ok:
         lines += [
-            "  DO NOT PROCEED TO CALIBRATION.",
+            "  GPP ratio failed.",
             "  No canopy efficiency in the prior range brings modelled annual GPP",
             f"  within a factor of {gate.tolerance:g} of the partitioned products. A forward",
             "  model this far off on total GPP will still converge and will still",
             "  produce a posterior, and that posterior will be meaningless.",
+            "",
+        ]
+    if not gate.lai_ok:
+        lines += [
+            "  Canopy density failed, and this invalidates the ratio above.",
+            f"  Modelled LAI runs {gate.lai_min:.2f} to {gate.lai_max:.2f}, outside the "
+            f"plausible band {gate.lai_band[0]:g}-{gate.lai_band[1]:g},",
+            f"  ending at {gate.lai_end:.2f}. The GPP ratio is dominated by canopy density,",
+            "  not by ceff, so a ratio measured at this LAI says nothing about ACM.",
+            "  Fix the parameters that set the canopy -- lma, f_fol, c_lf, cr_fall and",
+            "  c_fol_0 -- before reading the ratio as a verdict on photosynthesis.",
             "",
         ]
     return "\n".join(lines)
