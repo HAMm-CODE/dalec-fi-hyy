@@ -17,6 +17,10 @@ Diagnostics and figures are deliverables in their own right, not afterthoughts.
 
 ## Design decisions (locked)
 
+The full record — these decisions, the four corrections to the published papers,
+the resolved constants and the known structural problems — is in
+[DECISIONS.md](DECISIONS.md).
+
 | | |
 |---|---|
 | Assimilation target | `NEE_VUT_REF` only |
@@ -78,7 +82,7 @@ small `sys.path` fallback so they run from a bare checkout.
 Place the FLUXNET2015 FULLSET daily csv in `data/raw/`:
 
 ```
-data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-3.csv
+data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-4.csv
 ```
 
 It is gitignored — the FLUXNET data policy governs redistribution, and
@@ -196,7 +200,7 @@ Beyond the per-module tests, these invariants are enforced:
 |---|---|---|
 | 1 | Skeleton, config, `data_io`, QC coverage script | **done** |
 | 2 | `model_numpy.py` — DALEC2 A1–A6 plus A7/A8/A9 phenology | **done** |
-| 3 | `acm.py` — photosynthesis | blocked: ACM empirical coefficients |
+| 3 | `acm.py` — photosynthesis, wired into the forward model | **done** |
 | 4 | `parameters.py` registry and prior ranges | **done** |
 | 4 | `priors.py` — PyMC prior construction | after Phase 3 |
 | 5 | Morris screening | after Phase 4 |
@@ -206,12 +210,31 @@ Beyond the per-module tests, these invariants are enforced:
 | 9 | Slurm jobs (Tampere, CSC) | after Phase 8 |
 
 Unbuilt modules raise `NotImplementedError` rather than returning
-plausible-looking numbers. One component of the forward model is still injected
-as a callable defaulting to a stub that raises:
+plausible-looking numbers.
 
-- **`F_gpp`** — the ACM photosynthesis routine, Phase 3, awaiting its full
-  specification: the ten empirical coefficients, the equations, the solve
-  order, the `D_T` definition, the frost cutoff and the numerical guards.
+### Photosynthesis
+
+ACM (Williams et al. 1997) is complete, solve order **2-5-6-4-8-7-9** — Eq. 7
+consumes `E_0` from Eq. 8, so 8 must run first. `ceff` replaces the `a1·N`
+product; Eq. 3 is folded into Eq. 6 by the steady-state assumption.
+
+`F_gpp` stays **injected** rather than imported, because ACM needs two fixed
+site constants that are neither DALEC2 parameters nor drivers:
+`site.canopy_height_m` and `site.psi_d_mpa`. Both are **required with no
+defaults** — `acm_from_config()` raises rather than guessing. Build the routine
+with `make_acm(...)` or `acm_from_config(config)` and pass it as `gpp_fn=`.
+
+The **frost cutoff** (−2 °C, `acm.frost_threshold_degc`) reads only temperature
+drivers, so it is a fixed boolean mask over the time series — parameter-
+independent, safe to precompute, and no branch enters the gradient graph. It is
+applied *after* Eq. 9 so the arithmetic always runs on finite values.
+
+> **⚠ The frost cutoff is load-bearing, not cleanup.** Sweeping LAI and `ceff`
+> across their full prior ranges yields *zero* combinations with a realistic
+> summer peak and a small winter floor; the achievable summer/winter ratio is
+> structurally capped near 8 against an effectively unbounded true ratio. The
+> cutoff is the only mechanism available to suppress a temperature-independent
+> floor worth ~970 g C m⁻² yr⁻¹. Do not raise it towards zero or disable it.
 
 ### GPP magnitude gate
 
@@ -227,11 +250,29 @@ Ratios are computed on **matched days only**, so a gappy product cannot inflate
 them. The partitioned products remain a magnitude sanity check, never
 validation and never assimilated.
 
-Known ACM problems already measured, recorded in [acm.py](src/dalec/acm.py):
-annual GPP roughly 5× too high; near-total temperature insensitivity at low
-irradiance (0.5% across a 40 °C swing, because the light limitation drops `T`
-out entirely); and a `ceff` prior of 10–100 that barely overlaps the original
-`a1·N` value of ~5.7.
+Two further structural diagnostics sit alongside it:
+`shoulder_season_gpp()` measures how much GPP comes from days the frost mask
+misses but where ACM is still light-limited and therefore temperature-blind,
+and `calibration_bound_coverage()` reports what fraction of the driver record
+falls outside ACM's Table 1 calibration bounds.
+
+Known ACM problems, all measured and recorded in [acm.py](src/dalec/acm.py):
+annual GPP several-fold too high; near-total temperature insensitivity wherever
+the light limitation dominates (0.5% across a 40 °C swing, because `T` drops
+out of that branch entirely); no parameter combination that escapes it; and a
+`ceff` prior of 10–100 that barely overlaps the original `a1·N` value of ~5.7.
+
+**Scope.** Bloom & Williams (2015) §2.5 selected sites with little water stress
+and at most **three months** of below-freezing soil temperature, those criteria
+reflecting DALEC2's capabilities — hydrology is not explicitly represented.
+FI-Hyy has roughly **four to six months** of soil frost. Applying DALEC2 here is
+a deliberate scope decision, not an oversight.
+
+**Bearing on RQ3.** A GPP term insensitive to temperature over much of the year
+pushes seasonal structure onto the respiration parameters during calibration, so
+observed equifinality may be partly *structural* rather than informational. The
+Phase 7 synthetic twin separates the two — but only if it runs with the frost
+mask active over the same driver record.
 
 Everything else is complete. Carbon conservation holds for *any* value `F_gpp`
 returns, so A1–A8 are fully testable with a double in its place.

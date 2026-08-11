@@ -21,11 +21,22 @@ def test_default_config_loads() -> None:
     assert config["_config_path"] == str(DEFAULT_CONFIG_PATH)
 
 
-def test_default_config_leaves_year_blocks_unset() -> None:
-    """The split comes out of the Phase 1 coverage table, not out of a default."""
+def test_default_config_year_blocks_are_contiguous_and_abut() -> None:
+    """The split came out of the Phase 1 coverage table, not out of a default.
+
+    Both blocks were left null until ``results/qc_coverage.csv`` existed; they
+    are now filled, so what is worth pinning is the *design*: two contiguous
+    inclusive year ranges that abut, so the forward run integrates straight from
+    the start of calibration to the end of evaluation with no un-assimilated
+    bridge year. The unset case is still guarded, at ``require_year_block``.
+    """
     config = load_config()
-    assert config["years"]["calibration"] is None
-    assert config["years"]["evaluation"] is None
+    calibration = require_year_block(config, "calibration")
+    evaluation = require_year_block(config, "evaluation")
+
+    assert evaluation[0] == calibration[1] + 1, "the blocks must abut, leaving no gap"
+    # The FLUXNET2015 record for this site.
+    assert 1996 <= calibration[0] and evaluation[1] <= 2014
 
 
 def test_default_config_has_no_out_of_scope_knobs() -> None:

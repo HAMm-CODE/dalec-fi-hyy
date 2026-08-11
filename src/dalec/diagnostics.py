@@ -36,6 +36,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import pandas as pd
 
+from dalec.acm import ACM_CALIBRATION_BOUNDS, AcmModel
 from dalec.data_io import SiteData
 from dalec.model_numpy import (
     DalecOutput,
@@ -50,9 +51,11 @@ from dalec.parameters import DalecParameters, prior_bounds
 __all__ = [
     "GppMagnitudeGate",
     "annual_gpp_comparison",
+    "calibration_bound_coverage",
     "canopy_efficiency_sweep",
     "format_gpp_magnitude_report",
     "gpp_magnitude_gate",
+    "shoulder_season_gpp",
 ]
 
 #: Partitioned products compared against. Consistency check only, never
@@ -352,3 +355,152 @@ def format_gpp_magnitude_report(gate: GppMagnitudeGate) -> str:
             "",
         ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# ACM structural-bias diagnostics
+# ---------------------------------------------------------------------------
+
+
+def shoulder_season_gpp(
+    params: DalecParameters,
+    site_data: SiteData,
+    output: DalecOutput,
+    *,
+    acm: AcmModel,
+) -> pd.DataFrame:
+    """Quantify the residual temperature-independent GPP the frost mask misses.
+
+    ACM has effectively no temperature response where the Eq. 7 light limitation
+    dominates: GPP there collapses to ``E_0 * I * (d1*D_ms + d2)``, in which
+    ``T`` does not appear. The frost cutoff suppresses that floor, but only
+    below its threshold. Shoulder-season days that are cold and dim yet above
+    the cutoff still emit it.
+
+    This measures how much. The third column is the number that belongs in the
+    thesis limitations as a measured quantity rather than a qualitative caveat.
+
+    Parameters
+    ----------
+    params
+        Parameter set used for ``output``; supplies ``lma`` and ``ceff``.
+    site_data
+        Driver record.
+    output
+        Forward run over exactly that record, supplying the foliar carbon
+        trajectory.
+    acm
+        The photosynthesis routine, carrying the site constants and threshold.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per calendar year, indexed by year:
+
+        ``days``
+            Days in the year.
+        ``frost_days``
+            Days on which the frost mask suppressed GPP entirely.
+        ``light_limited_days``
+            Days where the mask was **inactive** but ACM was light-limited
+            (``E_0 * I < p_D``), i.e. still emitting the floor.
+        ``gpp_light_limited``
+            GPP contributed by those days, g C m-2 yr-1. The residual
+            structural bias.
+        ``gpp_total``
+            Modelled annual GPP total, g C m-2 yr-1.
+        ``fraction_light_limited``
+            ``gpp_light_limited / gpp_total``.
+    """
+    if output.n_steps != site_data.n_days:
+        raise ValueError(
+            f"forward run has {output.n_steps} steps but the record has "
+            f"{site_data.n_days} days; they must cover the same period"
+        )
+
+    # Foliar carbon enters photosynthesis at its time-t value, so drop the final
+    # state, which has no corresponding timestep.
+    terms = acm.terms(
+        doy=site_data.doy,
+        t_day=site_data.t_day,
+        t_night=site_data.t_night,
+        sw_in=site_data.sw_in,
+        co2=site_data.co2,
+        c_fol=output.pool("c_fol")[:-1],
+        lma=params.lma,
+        ceff=params.ceff,
+    )
+
+    frozen = terms["frost_masked"]
+    light_limited = (~frozen) & (terms["e_0"] * site_data.sw_in < terms["p_d"])
+    gpp = terms["gpp"]
+    years = site_data.years
+
+    rows = []
+    for year in np.unique(years):
+        in_year = years == year
+        total = float(gpp[in_year].sum())
+        residual = float(gpp[in_year & light_limited].sum())
+        rows.append(
+            {
+                "year": int(year),
+                "days": int(in_year.sum()),
+                "frost_days": int(np.count_nonzero(frozen & in_year)),
+                "light_limited_days": int(np.count_nonzero(light_limited & in_year)),
+                "gpp_light_limited": residual,
+                "gpp_total": total,
+                "fraction_light_limited": residual / total if total > 0.0 else float("nan"),
+            }
+        )
+
+    return pd.DataFrame(rows).set_index("year")
+
+
+def calibration_bound_coverage(site_data: SiteData) -> pd.DataFrame:
+    """Fraction of the driver record falling outside each ACM calibration bound.
+
+    ACM must not extrapolate beyond the ranges it was fitted over
+    (Williams et al. Table 1). This is a thesis limitation figure, not merely a
+    test: it states how much of the record is extrapolation.
+
+    Only the average-daily-temperature bound is currently registered in
+    :data:`dalec.acm.ACM_CALIBRATION_BOUNDS`; the remaining Table 1 rows are
+    still outstanding, and this will pick them up without code changes.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by quantity, with ``lower``, ``upper``, ``n_days``,
+        ``n_below``, ``n_above`` and ``fraction_outside``.
+    """
+    from dalec.acm import average_daily_temperature
+
+    available: dict[str, np.ndarray] = {
+        "t_mean": np.asarray(average_daily_temperature(site_data.t_day, site_data.t_night)),
+        "sw_in": site_data.sw_in,
+        "co2": site_data.co2,
+    }
+
+    rows = []
+    for quantity, (lower, upper) in ACM_CALIBRATION_BOUNDS.items():
+        if quantity not in available:
+            raise KeyError(
+                f"calibration bound registered for {quantity!r}, but the driver "
+                f"record exposes only {sorted(available)}"
+            )
+        values = available[quantity]
+        below = int(np.count_nonzero(values < lower))
+        above = int(np.count_nonzero(values > upper))
+        rows.append(
+            {
+                "quantity": quantity,
+                "lower": lower,
+                "upper": upper,
+                "n_days": int(values.size),
+                "n_below": below,
+                "n_above": above,
+                "fraction_outside": (below + above) / values.size,
+            }
+        )
+
+    return pd.DataFrame(rows).set_index("quantity")

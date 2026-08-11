@@ -46,12 +46,14 @@ residual, and it should be at floating-point noise.
 Note that ``theta_min`` moves carbon from litter to soil and is therefore a
 *transfer*, not a loss: only ``theta_lit`` and ``theta_som`` enter respiration.
 
-Not yet implemented
--------------------
-``F_gpp`` (the Aggregated Canopy Model) is Phase 3, still awaiting its empirical
-coefficients. It is injected as a callable and defaults to a stub that raises.
-Everything else -- A1-A6 and the A7/A8 phenology -- is complete, and carbon
-conservation holds for *any* value ``F_gpp`` returns.
+Photosynthesis
+--------------
+``F_gpp`` is injected rather than imported, because the Aggregated Canopy Model
+needs two fixed site constants that are neither DALEC2 parameters nor drivers.
+Build it with ``dalec.acm.make_acm(...)`` or ``dalec.acm.acm_from_config(...)``
+and pass it as ``gpp_fn=``; the default refuses to run. A test double may be
+passed instead to exercise A1-A8 on their own -- carbon conservation holds for
+*any* value ``F_gpp`` returns.
 """
 
 from __future__ import annotations
@@ -213,11 +215,20 @@ def gpp_not_implemented(
     lma: float,
     ceff: float,
 ) -> float:
-    """Placeholder for ``F_gpp``. Signature only -- see ``dalec.acm`` (Phase 3)."""
+    """Default ``gpp_fn``: refuses to run rather than inventing photosynthesis.
+
+    ACM is implemented in ``dalec.acm``, but it needs two fixed site constants
+    -- canopy height and leaf-to-soil water potential difference -- that are
+    neither DALEC2 parameters nor drivers, and so cannot travel through this
+    per-day signature. Build the real routine with
+    ``dalec.acm.make_acm(canopy_height_m=..., psi_d_mpa=...)`` or
+    ``dalec.acm.acm_from_config(config)`` and pass it as ``gpp_fn=``.
+    """
     raise NotImplementedError(
-        "F_gpp is not implemented yet. The Aggregated Canopy Model is Phase 3 and "
-        "needs its empirical coefficients from Williams et al. (1997). Pass a "
-        "gpp_fn= test double to exercise equations A1-A6 in the meantime."
+        "no photosynthesis routine was supplied. Pass the Aggregated Canopy "
+        "Model via gpp_fn=dalec.acm.make_acm(canopy_height_m=..., psi_d_mpa=...), "
+        "or acm_from_config(config); both site constants are required and have "
+        "no defaults. A test double may be passed instead to exercise A1-A8 alone."
     )
 
 

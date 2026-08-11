@@ -18,8 +18,30 @@ site:
   # Evergreen needleleaf forest (Scots pine). Being evergreen is the ecological
   # ground for fixing the five phenology parameters in Phase 4.
   igbp: ENF
-  latitude_deg: 61.8474    # needed by the ACM day-length term (Phase 3)
+  latitude_deg: 61.8474
   longitude_deg: 24.2948
+
+  # --- Fixed ACM site constants. REQUIRED, no defaults. ---------------------
+  # Neither is a DALEC2 parameter and neither is a driver: both are properties
+  # of the stand, taken from the site literature. dalec.acm.acm_from_config
+  # raises rather than guessing them.
+  canopy_height_m: null    # H, metres
+  psi_d_mpa: null          # psi_d, leaf-to-soil water potential difference, MPa, negative
+
+# --- Photosynthesis (ACM) ----------------------------------------------------
+acm:
+  # No carbon is fixed below this average daily temperature. ACM was calibrated
+  # over 7-30 degC (Williams et al. Table 1) and must not extrapolate; -2.0 is
+  # the precedent those authors applied at their Oregon coniferous sites.
+  #
+  # This is LOAD-BEARING, not cleanup. Sweeping LAI and ceff across their whole
+  # prior ranges cannot produce a realistic summer peak together with a small
+  # winter floor -- the achievable summer/winter ratio is structurally capped
+  # near 8, against an effectively unbounded true ratio. The cutoff is the only
+  # mechanism available to suppress the temperature-independent floor. Raising
+  # it towards zero, or disabling it, silently reintroduces roughly 970
+  # g C m-2 yr-1 of spurious photosynthesis. See src/dalec/acm.py.
+  frost_threshold_degc: -2.0
 
 # --- Paths -------------------------------------------------------------------
 paths:
@@ -28,7 +50,7 @@ paths:
   results_dir: results
   # FLUXNET2015 FULLSET daily file. FULLSET, not SUBSET: SUBSET omits
   # NEE_VUT_REF_RANDUNC, which is the standard deviation of the likelihood.
-  fluxnet_file: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-3.csv
+  fluxnet_file: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-4.csv
   processed_file: data/processed/fi_hyy_dalec_inputs.nc
 
 # --- Data screening ----------------------------------------------------------
@@ -43,11 +65,26 @@ data:
 # A contiguous calibration block followed by a forward run over a contiguous
 # held-out block (Richardson et al. 2010). Both are inclusive year ranges.
 #
-# TO BE FILLED from the Phase 1 coverage table (scripts/00_qc_coverage.py).
-# Left null deliberately -- the scripts raise rather than silently defaulting.
+# Chosen from the Phase 1 coverage table (results/qc_coverage.csv). Both blocks
+# are inclusive and contiguous, and they abut, so the forward run integrates
+# straight from the start of calibration to the end of evaluation with no
+# un-assimilated bridge year.
+#
+#   calibration  1997-2005   3287 days, 2781 assimilable (84.6%)
+#   evaluation   2006-2009   1461 days, 1390 assimilable (95.1%)
+#
+# Excluded, and why:
+#   1996  19 days with missing drivers -- the forward model cannot integrate
+#         through a gap, so the year is unusable outright.
+#   2010-2011  66% and 52% usable; 2011 loses 174 otherwise-good days to
+#         missing NEE_VUT_REF_RANDUNC.
+#   2012-2013  kept in reserve; usable but after a two-year break.
+#   2014  356 QC-passing days at mean QC 0.974, and *zero* RANDUNC values for
+#         the entire year. No uncertainty means no Gaussian sd, so not a single
+#         day of 2014 can enter the likelihood.
 years:
-  calibration: null   # e.g. [2000, 2006]
-  evaluation: null    # e.g. [2007, 2011]
+  calibration: [1997, 2005]
+  evaluation: [2006, 2009]
 
 # --- Fixed parameters --------------------------------------------------------
 # Parameters held at a constant value instead of being sampled. Populated in
