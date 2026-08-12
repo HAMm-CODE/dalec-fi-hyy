@@ -14,6 +14,7 @@ from conftest import (
     NEE_MISSING_DATES,
     RANDUNC_MISSING_DATES,
     SyntheticFluxnet,
+    synthetic_extremes,
 )
 from dalec.data_io import (
     DRIVER_COLUMNS,
@@ -109,7 +110,10 @@ def test_sw_conversion_round_trips() -> None:
 
 def test_site_data_radiation_is_converted(synthetic_fluxnet: SyntheticFluxnet) -> None:
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
-    site_data = build_site_data(frame, start_year=2000, end_year=2001, qc_threshold=QC_THRESHOLD)
+    site_data = build_site_data(
+        frame, start_year=2000, end_year=2001, qc_threshold=QC_THRESHOLD,
+        daily_extremes=synthetic_extremes(pd.DatetimeIndex(frame.index)),
+    )
     expected = frame.loc["2000":"2001", "SW_IN_F"].to_numpy() * SW_W_M2_TO_MJ_M2_DAY
     assert site_data.sw_in == pytest.approx(expected)
     # Sanity: a boreal daily total is single-digit MJ m-2 d-1, not hundreds.
@@ -176,7 +180,9 @@ def test_coverage_table_threshold_is_honoured(synthetic_fluxnet: SyntheticFluxne
 def site_data(synthetic_fluxnet: SyntheticFluxnet) -> SiteData:
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
     return build_site_data(
-        frame, start_year=2000, end_year=2001, qc_threshold=QC_THRESHOLD, site_code="XX-Syn"
+        frame, start_year=2000, end_year=2001, qc_threshold=QC_THRESHOLD,
+        site_code="XX-Syn",
+        daily_extremes=synthetic_extremes(pd.DatetimeIndex(frame.index)),
     )
 
 
@@ -233,7 +239,8 @@ def test_likelihood_arrays_are_finite_and_positive(site_data: SiteData) -> None:
 def test_driver_gap_raises_with_a_useful_message(synthetic_fluxnet: SyntheticFluxnet) -> None:
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
     with pytest.raises(ValueError, match="driver gaps") as excinfo:
-        build_site_data(frame, start_year=2002, end_year=2002, qc_threshold=QC_THRESHOLD)
+        build_site_data(frame, start_year=2002, end_year=2002, qc_threshold=QC_THRESHOLD,
+                        temperature_source="day_night_proxy")
     message = str(excinfo.value)
     assert "SW_IN_F" in message
     assert "2002-06-01" in message
@@ -244,19 +251,22 @@ def test_partial_year_range_raises(synthetic_fluxnet: SyntheticFluxnet) -> None:
     truncated = frame.loc[:"2001-06-30"]
     truncated.attrs = frame.attrs
     with pytest.raises(ValueError, match="partially covered"):
-        build_site_data(truncated, start_year=2000, end_year=2001)
+        build_site_data(truncated, start_year=2000, end_year=2001,
+                        temperature_source="day_night_proxy")
 
 
 def test_year_range_outside_record_raises(synthetic_fluxnet: SyntheticFluxnet) -> None:
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
     with pytest.raises(ValueError, match="no rows"):
-        build_site_data(frame, start_year=1990, end_year=1991)
+        build_site_data(frame, start_year=1990, end_year=1991,
+                        temperature_source="day_night_proxy")
 
 
 def test_reversed_year_range_raises(synthetic_fluxnet: SyntheticFluxnet) -> None:
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
     with pytest.raises(ValueError, match="before start_year"):
-        build_site_data(frame, start_year=2001, end_year=2000)
+        build_site_data(frame, start_year=2001, end_year=2000,
+                        temperature_source="day_night_proxy")
 
 
 def test_partitioned_products_are_carried_but_flagged(site_data: SiteData) -> None:

@@ -187,24 +187,70 @@ B3 applies `exp(a8 * Tmax)` to the **maximum**, not to a mean. `Tr` is the
 what finally divides, and getting that factor of two wrong is silent.
 Decomposition in A5/A6 uses `TA_F`, a third and distinct temperature.
 
-**The daily range is floored at zero, counted and warned — interim only.** `Tr`
-is a range and cannot be negative, but the day/night means standing in for
-maximum and minimum do invert: at FI-Hyy on **14.8%** of calibration days,
-driving the B1 denominator negative on **5.0%** of them. The FULLSET **daily**
-product carries no `TA_F_MAX` or `TA_F_MIN` — only day and night means.
-`AcmModel.range_floor_count` reports the tally.
+### Daily extremes come from the half-hourly product, not from the daily one
 
-**The floor is not the conservative direction.** `Tr = 0` minimises the B1
+`Tr` is a range and cannot be negative. The FULLSET **daily** product carries no
+`TA_F_MAX` or `TA_F_MIN` — only daytime and nighttime *means* — and those means
+invert on **14.8%** of calibration days, driving the B1 denominator negative on
+**5.0%** of them. So `scripts/01b_derive_tminmax.py` derives the true extremes
+from the half-hourly `TA_F` by a groupby, and `data_io` joins them onto the
+driver record. All 6940 days are complete at 48 valid half-hours; no day has a
+negative range.
+
+**The proxy was not merely occasionally inverted — it was systematically wrong.**
+Measured over 1997–2005:
+
+| | correlation | mean bias | RMSE | proxy min | truth min |
+|---|---:|---:|---:|---:|---:|
+| `t_max` vs `TA_F_DAY` | 0.989 | −2.51 °C | 2.91 | −29.44 | −26.32 |
+| `t_min` vs `TA_F_NIGHT` | 0.989 | +2.28 °C | 2.65 | −29.07 | −32.13 |
+| **`t_range`** | **0.641** | **−4.79 °C** | 5.39 | −5.54 | 0.20 |
+
+**The correlation split is the finding.** Each *level* tracks its true
+counterpart almost perfectly, at 0.989 — but the biases run in opposite
+directions, the daytime mean sitting 2.51 °C below the true maximum and the
+nighttime mean 2.28 °C above the true minimum, and those two biases **compound in
+the difference**. The range therefore correlates only 0.641 and averages
+1.55 °C against a true 6.34: understated fourfold across the whole record, not
+merely on the 486 days that inverted. On those 486 days the true range averages
+4.63 °C and reaches 17.8. This justifies the extra preprocessing step and belongs
+in the thesis Methods.
+
+**Sensitivity, and what it says about the regime.** Substituting the true
+extremes changes annual GPP by **−1.2% at the gate's operating point** but
+**−16.8% at `ceff` = 100**. Small where the model is light-limited, in which
+regime conductance barely matters; large where it is diffusion-limited, where it
+matters directly. The model sits in the light-limited regime at its working
+`ceff`, which is why the correction is modest there.
+
+**The interim floor is retained but now unreachable.** `AcmModel.range_floor_count`
+still counts days where `Tr < 0` and is asserted to be zero over the calibration
+block; if it ever fires again, something upstream has broken. Note the direction
+it had, since it is easy to assume the reassuring one: `Tr = 0` minimises the B1
 denominator and therefore *maximises* conductance — `g_c = 4.570` against 1.25 at
-`Tr = 2` and 0.32 at `Tr = 10`. Measured, it **inflates** GPP on the affected
-days by 2.8% (against a plausible `Tr` of 1 °C) to 10.9% (against 4 °C), and the
-whole-block total by 0.17–0.24%, the affected days being mostly low-GPP winter
-days.
+`Tr = 2` and 0.32 at `Tr = 10` — so the floor **inflated** GPP on the affected
+days by 2.8–10.9%, and the whole block by 0.17–0.24%.
 
-**The real fix is the half-hourly product.** FULLSET **HH** carries half-hourly
-`TA_F`, from which true daily maximum and minimum are a groupby. Then `Tr` is
-non-negative by construction, the floor becomes unreachable, and the inversion
-problem disappears. Pending `scripts/01b_derive_tminmax.py`.
+**The day/night proxy path is retained behind an explicit flag**,
+`temperature_source="day_night_proxy"`, unreachable by default. It is the
+comparison baseline for `diagnostics.temperature_proxy_comparison`, not a
+substitute.
+
+### Three temperatures, and they must not be confused
+
+The driver record now carries four temperature quantities, of which three reach
+the model and they reach different parts of it:
+
+| quantity | source | consumed by |
+|---|---|---|
+| `t_air` | `TA_F`, daily mean | decomposition and respiration, A5/A6/A10 |
+| `t_max`, `t_min` | derived from half-hourly | photosynthesis only |
+| `t_day`, `t_night` | `TA_F_DAY`, `TA_F_NIGHT` | **nothing** — comparison baseline |
+
+Mixing them changes numbers without raising anything, so the separation is
+asserted from both directions: a spy `gpp_fn` confirms photosynthesis receives
+`t_max`/`t_min` and never `t_air` by name or by value, and moving `t_day`/
+`t_night` by 25 °C is confirmed to change neither GPP nor respiration at all.
 
 **Half-range convention, verified.** B1 applies `0.5 * Tr` internally, so the
 `Tr` passed in must be the **full** range `T_max − T_min`, not the half-range
@@ -326,13 +372,24 @@ temperature.** What the rewrite fixed is the seasonal *amplitude*.
 **2. The coefficient sets are site-calibrated and neither is boreal.** Adopting
 Loobos is the closest available match, not a fitted choice.
 
-**3. 59.3% of calibration days fall below ACM's 7 °C lower calibration bound**,
+**3. 59.0% of calibration days fall below ACM's 7 °C lower calibration bound**,
 so the model extrapolates on most of the record. `ACM_CALIBRATION_BOUNDS`
 currently holds only the temperature row.
 
-**4. The day/night temperature proxy inverts on 14.8% of days**, floored and
-counted — see §3. The floor inflates rather than suppresses. Interim, pending
-true daily min/max from the half-hourly product.
+**4. The modelled growing season is about 41 days too long, and its peak about a
+quarter too low.** Caught by `seasonal_timing` on its first real run, at
+`ceff` 11.7 with LAI near 3: the seasonal *peak* lands on the observed day
+exactly (doy 185), but onset is at doy 79 against 110–111 for the two products
+and cessation at 287 against 277, giving a season of 208 days against 166–167.
+Peak daily GPP is 7.56 g C m⁻² d⁻¹ at the 99th percentile against 10.43 (NT) and
+11.52 (DT). The annual total is right — the gate passes at 1.032 — because the
+model spreads the correct amount of carbon over a longer, flatter season.
+
+**This is exactly the failure the magnitude gate cannot see**, and the reason the
+timing diagnostic exists. Whether it is an ACM property or a phenology-parameter
+artefact is not yet established: `d_onset`, `cr_onset` and `cr_fall` were set by
+hand for this run, not fitted, and `d_fall` is inert (§2, correction 2). Do not
+attribute it to ACM before Morris screening.
 
 **Scope: this site is outside the envelope DALEC2's authors defined.** Bloom &
 Williams (2015) §2.5 selected sites with little expected water stress and no more

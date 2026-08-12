@@ -47,11 +47,26 @@ So :func:`gpp_magnitude_gate` reports the LAI trajectory alongside the ratio and
 fails independently, with a distinct message, when modelled LAI leaves a
 plausible band. Both failures are real; they mean different things and the
 report says which.
+
+Seasonal timing is a separate check, because the gate cannot see it
+------------------------------------------------------------------
+An annual total is an integral, and an integral is nearly blind to phase.
+Correcting a genuine ten-day phase error in the day-length term on this site
+moved the whole-record GPP ratio by under 0.3% while moving the seasonal peak by
+four days. A timing error therefore passes the magnitude gate untouched, and
+during calibration it will be absorbed into the phenology or turnover parameters
+and reported as a fitted result.
+
+:func:`seasonal_timing` is the check that would catch it. It reports the peak
+offset, onset and cessation against both partitioned products, and deliberately
+returns no verdict: at uncalibrated parameters the numbers are not yet meaningful
+enough to set a threshold on.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Final
 
 import numpy as np
 import pandas as pd
@@ -75,7 +90,9 @@ __all__ = [
     "calibration_bound_coverage",
     "canopy_efficiency_sweep",
     "format_gpp_magnitude_report",
+    "format_seasonal_timing_report",
     "gpp_magnitude_gate",
+    "seasonal_timing",
     "shoulder_season_gpp",
     "temperature_proxy_comparison",
 ]
@@ -530,8 +547,8 @@ def shoulder_season_gpp(
     # state, which has no corresponding timestep.
     terms = acm.terms(
         doy=site_data.doy,
-        t_day=site_data.t_day,
-        t_night=site_data.t_night,
+        t_max=site_data.t_max,
+        t_min=site_data.t_min,
         sw_in=site_data.sw_in,
         co2=site_data.co2,
         c_fol=output.pool("c_fol")[:-1],
@@ -564,6 +581,162 @@ def shoulder_season_gpp(
     return pd.DataFrame(rows).set_index("year")
 
 
+#: Smoothing window for the seasonal climatology, days. See
+#: :func:`seasonal_timing` for why an unsmoothed climatology is not usable.
+CLIMATOLOGY_WINDOW_DAYS: Final[int] = 21
+
+#: Fraction of the seasonal peak defining onset and cessation.
+SEASON_THRESHOLD: Final[float] = 0.25
+
+#: Suggested pass criterion for the peak offset, days. **Reported, not
+#: enforced**: at uncalibrated parameters the number is not yet meaningful, and
+#: the threshold should be set once it has been seen at calibrated ones.
+SUGGESTED_PEAK_OFFSET_DAYS: Final[int] = 10
+
+
+def _smoothed_climatology(
+    doy: np.ndarray, values: np.ndarray, window: int = CLIMATOLOGY_WINDOW_DAYS
+) -> pd.Series:
+    """Mean seasonal cycle by day of year, circularly smoothed.
+
+    The smoothing is not cosmetic. On this record the *unsmoothed* daily
+    climatology puts the modelled peak at day 162 and the observed at 189, both
+    of which are noise artefacts -- with nine years averaged, a single warm
+    bright day still moves the argmax. Smoothed over 21 days the same series
+    peak at 185 and 185. Do not revert to the raw climatology to "avoid
+    smoothing bias"; the bias it avoids is smaller than the noise it admits.
+
+    Wrapped before smoothing so that December and January are neighbours.
+    """
+    series = pd.DataFrame({"doy": doy, "value": values}).groupby("doy")["value"].mean()
+    tripled = pd.concat([series, series, series])
+    smoothed = tripled.rolling(window, center=True, min_periods=1).mean()
+    return smoothed.iloc[len(series) : 2 * len(series)]
+
+
+def _season_edges(climatology: pd.Series) -> tuple[int, int]:
+    """First and last day of year above :data:`SEASON_THRESHOLD` of the peak."""
+    above = climatology[climatology >= SEASON_THRESHOLD * float(climatology.max())]
+    if above.empty:
+        return (-1, -1)
+    return int(above.index[0]), int(above.index[-1])
+
+
+def seasonal_timing(output: DalecOutput, site_data: SiteData) -> pd.DataFrame:
+    """Where the modelled growing season sits against the partitioned products.
+
+    The magnitude gate integrates over a year, and an integral is nearly blind to
+    phase: a ten-day shift in the seasonal cycle moved the whole-record GPP ratio
+    by under 0.3% on this site while moving the peak by four days. So a timing
+    error can pass the gate untouched, and then be absorbed during calibration
+    into the phenology or turnover parameters and misread as a fitted result.
+    This is the check that would catch it.
+
+    Parameters
+    ----------
+    output
+        Forward run over exactly the days in ``site_data``.
+    site_data
+        Driver record and partitioned products for the same block.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per series -- ``model``, ``gpp_nt``, ``gpp_dt`` -- indexed by
+        name:
+
+        ``peak_doy``
+            Day of year of the smoothed climatological maximum.
+        ``peak_offset_days``
+            ``peak_doy`` minus the mean of the two products' peaks. Zero for the
+            products themselves by construction of the reference.
+        ``onset_doy``, ``cessation_doy``
+            First and last day above :data:`SEASON_THRESHOLD` of the peak.
+        ``season_length_days``
+            ``cessation_doy - onset_doy``.
+        ``correlation``
+            Daily correlation against the mean of the two products, on days where
+            both are present. **Reported, never a pass criterion** -- at
+            uncalibrated parameters it says little, and it moved the wrong way
+            when a genuine phase error was corrected on this record.
+
+    Notes
+    -----
+    No verdict is returned. :data:`SUGGESTED_PEAK_OFFSET_DAYS` records a proposed
+    criterion of 10 days, deliberately not enforced until the number has been
+    seen at calibrated parameters.
+    """
+    _require_products(site_data)
+    if output.n_steps != site_data.n_days:
+        raise ValueError(
+            f"forward run has {output.n_steps} steps but the block has "
+            f"{site_data.n_days} days; they must cover the same period"
+        )
+
+    doy = site_data.doy
+    nt = site_data.partitioned["gpp_nt"]
+    dt = site_data.partitioned["gpp_dt"]
+    reference = 0.5 * (nt + dt)
+    both = np.isfinite(reference)
+
+    series = {"model": output.gpp, "gpp_nt": nt, "gpp_dt": dt}
+    climatologies = {
+        name: _smoothed_climatology(doy, np.where(np.isfinite(values), values, np.nan))
+        for name, values in series.items()
+    }
+    product_peak = 0.5 * (
+        int(climatologies["gpp_nt"].idxmax()) + int(climatologies["gpp_dt"].idxmax())
+    )
+
+    rows = []
+    for name, climatology in climatologies.items():
+        onset, cessation = _season_edges(climatology)
+        values = series[name]
+        finite = both & np.isfinite(values)
+        rows.append(
+            {
+                "series": name,
+                "peak_doy": int(climatology.idxmax()),
+                "peak_offset_days": int(climatology.idxmax()) - product_peak,
+                "onset_doy": onset,
+                "cessation_doy": cessation,
+                "season_length_days": cessation - onset,
+                "correlation": (
+                    float(np.corrcoef(values[finite], reference[finite])[0, 1])
+                    if finite.sum() > 1
+                    else float("nan")
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows).set_index("series")
+
+
+def format_seasonal_timing_report(table: pd.DataFrame) -> str:
+    """Render :func:`seasonal_timing` as a readable console report."""
+    offset = float(table.loc["model", "peak_offset_days"])
+    return "\n".join(
+        [
+            "=" * 78,
+            "  Seasonal timing",
+            "=" * 78,
+            f"  modelled peak offset   {offset:+.0f} days against the partitioned products",
+            f"  suggested criterion    within {SUGGESTED_PEAK_OFFSET_DAYS} days "
+            "-- REPORTED, NOT ENFORCED",
+            "",
+            "  The magnitude gate integrates over a year and is nearly blind to",
+            "  phase, so a timing error can pass it untouched and then be absorbed",
+            "  into the phenology parameters during calibration.",
+            "",
+            f"  Climatology smoothed over {CLIMATOLOGY_WINDOW_DAYS} days; onset and "
+            f"cessation at {SEASON_THRESHOLD:.0%} of peak.",
+            "",
+            table.to_string(float_format=lambda value: f"{value:9.3f}"),
+            "",
+        ]
+    )
+
+
 def temperature_proxy_comparison(
     site_data: SiteData, daily_extremes: pd.DataFrame
 ) -> pd.DataFrame:
@@ -582,7 +755,10 @@ def temperature_proxy_comparison(
     Parameters
     ----------
     site_data
-        Driver record carrying the proxy, ``t_day`` and ``t_night``.
+        Driver record. The **proxy** is read from ``t_day`` and ``t_night``,
+        which are retained for exactly this comparison; ``t_max`` and ``t_min``
+        are not used here, since under the default temperature source they are
+        already the truth being compared against.
     daily_extremes
         Output of ``01b_derive_tminmax.py``, indexed by date, with ``t_max``,
         ``t_min``, ``t_range`` and ``reliable`` columns.
@@ -683,7 +859,7 @@ def calibration_bound_coverage(site_data: SiteData) -> pd.DataFrame:
     from dalec.acm import average_daily_temperature
 
     available: dict[str, np.ndarray] = {
-        "t_mean": np.asarray(average_daily_temperature(site_data.t_day, site_data.t_night)),
+        "t_mean": np.asarray(average_daily_temperature(site_data.t_max, site_data.t_min)),
         "sw_in": site_data.sw_in,
         "co2": site_data.co2,
     }

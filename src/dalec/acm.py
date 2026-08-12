@@ -8,7 +8,7 @@ values in Appendices A (Loobos) and D (Oregon).
 Secondary source, retained below but **not used**: Williams, M. et al. (1997),
 *Ecological Applications* 7(3), 882-894.
 
-Inputs: day of year, atmospheric CO2 (umol mol-1), daytime and nighttime air
+Inputs: day of year, atmospheric CO2 (umol mol-1), daily maximum and minimum air
 temperature (degrees C), daily total shortwave radiation (MJ m-2 d-1), foliar
 carbon (g C m-2), leaf mass per area (g C m-2) and canopy efficiency, plus one
 fixed site constant, latitude.
@@ -73,11 +73,18 @@ DALEC2 substitutions
 ``a1 * N`` in the 1997 form, so foliar N is not implemented. ``L`` is
 ``C_fol / lma`` and comes from model state, not from drivers.
 
-``Tmax`` is the daily maximum temperature, here ``TA_F_DAY``. ``Tr`` is the
-**full** daily temperature range, ``TA_F_DAY - TA_F_NIGHT``; note B1 takes
-``0.5 * Tr``, so the half-range still appears, and getting that factor of two
-wrong is silent. Decomposition in A5/A6 uses ``TA_F``, which is a third,
-distinct temperature.
+``Tmax`` and ``Tmin`` are the **true** daily maximum and minimum, derived from
+the half-hourly product by ``scripts/01b_derive_tminmax.py``. ``Tr`` is the
+**full** range ``Tmax - Tmin``; note B1 takes ``0.5 * Tr``, so the half-range
+still appears, and getting that factor of two wrong is silent. Decomposition in
+A5/A6 uses ``TA_F``, the daily mean, which is a third and distinct temperature
+that never reaches this module.
+
+``TA_F_DAY`` and ``TA_F_NIGHT`` were used as stand-ins for the extremes until the
+half-hourly extremes were derived. They are a poor proxy -- the range they imply
+correlates 0.641 with the truth and understates it by 4.79 degC -- and they are
+retained only as the comparison baseline. See
+``dalec.diagnostics.temperature_proxy_comparison``.
 
 Frost cutoff
 ------------
@@ -362,27 +369,27 @@ _SOLAR_ORIGIN_OFFSET_DAYS: Final[float] = 10.0
 # ---------------------------------------------------------------------------
 
 
-def average_daily_temperature(t_day: Any, t_night: Any) -> Any:
+def average_daily_temperature(t_max: Any, t_min: Any) -> Any:
     """Mean of daily maximum and minimum, degrees C.
 
     Used for the frost mask and for the calibration-bound diagnostics. **Not**
     used inside the DALEC form of ACM, which takes ``Tmax`` directly.
     """
-    return 0.5 * (np.asarray(t_day, dtype=float) + np.asarray(t_night, dtype=float))
+    return 0.5 * (np.asarray(t_max, dtype=float) + np.asarray(t_min, dtype=float))
 
 
-def daily_temperature_range(t_day: Any, t_night: Any) -> Any:
+def daily_temperature_range(t_max: Any, t_min: Any) -> Any:
     """``Tr``: the **full** daily temperature range, degrees C.
 
     Chuter B1 takes ``0.5 * Tr``, so the half-range is what finally enters the
     conductance denominator. Passing the half-range here would halve it again.
     """
-    return np.asarray(t_day, dtype=float) - np.asarray(t_night, dtype=float)
+    return np.asarray(t_max, dtype=float) - np.asarray(t_min, dtype=float)
 
 
-def daily_temperature_half_range(t_day: Any, t_night: Any) -> Any:
+def daily_temperature_half_range(t_max: Any, t_min: Any) -> Any:
     """``0.5 * Tr``, degrees C -- the quantity B1 actually divides by."""
-    return 0.5 * daily_temperature_range(t_day, t_night)
+    return 0.5 * daily_temperature_range(t_max, t_min)
 
 
 def leaf_area_index(c_fol: Any, lma: Any) -> Any:
@@ -443,8 +450,8 @@ def chuter_day_length_factor(
 
 
 def frost_mask(
-    t_day: Any,
-    t_night: Any,
+    t_max: Any,
+    t_min: Any,
     frost_threshold_degc: float = DEFAULT_FROST_THRESHOLD_DEGC,
 ) -> np.ndarray:
     """Boolean mask, True on days where frost suppresses all carbon fixation.
@@ -455,7 +462,7 @@ def frost_mask(
     so no parameter-dependent branch enters the gradient graph.
     """
     return np.asarray(
-        average_daily_temperature(t_day, t_night) < frost_threshold_degc, dtype=bool
+        average_daily_temperature(t_max, t_min) < frost_threshold_degc, dtype=bool
     )
 
 
@@ -467,8 +474,8 @@ def frost_mask(
 def acm_terms(
     *,
     doy: Any,
-    t_day: Any,
-    t_night: Any,
+    t_max: Any,
+    t_min: Any,
     sw_in: Any,
     co2: Any,
     c_fol: Any,
@@ -486,7 +493,7 @@ def acm_terms(
     ----------
     doy
         Day of year, 1-366.
-    t_day, t_night
+    t_max, t_min
         Daily mean daytime and nighttime air temperature, degrees C, standing in
         for the daily maximum and minimum.
     sw_in
@@ -520,9 +527,9 @@ def acm_terms(
         If the B1 denominator ``0.5*Tr + a6*Rtot`` is not safely positive.
     """
     coef = coefficients
-    t_mean = average_daily_temperature(t_day, t_night)
-    t_max = np.asarray(t_day, dtype=float)
-    t_range_raw = daily_temperature_range(t_day, t_night)
+    t_mean = average_daily_temperature(t_max, t_min)
+    t_max = np.asarray(t_max, dtype=float)
+    t_range_raw = daily_temperature_range(t_max, t_min)
     lai = leaf_area_index(c_fol, lma)
     irradiance = np.asarray(sw_in, dtype=float)
     c_a = np.asarray(co2, dtype=float)
@@ -631,7 +638,7 @@ def acm_terms(
 
     # Frost cutoff, applied last so the arithmetic above always runs on finite
     # values.
-    frost_masked = frost_mask(t_day, t_night, frost_threshold_degc)
+    frost_masked = frost_mask(t_max, t_min, frost_threshold_degc)
     gpp = np.where(frost_masked, 0.0, gpp_unmasked)
 
     return {
@@ -706,8 +713,8 @@ class AcmModel:
         self,
         *,
         doy: int,
-        t_day: float,
-        t_night: float,
+        t_max: float,
+        t_min: float,
         sw_in: float,
         co2: float,
         c_fol: float,
@@ -717,8 +724,8 @@ class AcmModel:
         """Return GPP for one day, g C m-2 d-1."""
         terms = self.terms(
             doy=doy,
-            t_day=t_day,
-            t_night=t_night,
+            t_max=t_max,
+            t_min=t_min,
             sw_in=sw_in,
             co2=co2,
             c_fol=c_fol,
@@ -824,8 +831,8 @@ def williams1997_day_length_factor(doy: Any) -> np.ndarray:
 def williams1997_terms(
     *,
     doy: Any,
-    t_day: Any,
-    t_night: Any,
+    t_max: Any,
+    t_min: Any,
     sw_in: Any,
     co2: Any,
     c_fol: Any,
@@ -841,8 +848,8 @@ def williams1997_terms(
     negative here, unlike the magnitude Chuter uses.
     """
     coef = WILLIAMS_1997_COEFFICIENTS
-    t_mean = average_daily_temperature(t_day, t_night)
-    d_t = daily_temperature_half_range(t_day, t_night)
+    t_mean = average_daily_temperature(t_max, t_min)
+    d_t = daily_temperature_half_range(t_max, t_min)
     lai = leaf_area_index(c_fol, lma)
     irradiance = np.asarray(sw_in, dtype=float)
     c_a = np.asarray(co2, dtype=float)
@@ -883,7 +890,7 @@ def williams1997_terms(
     # Eq. 9 -- the latitude-free day-length correction.
     day_length_factor = williams1997_day_length_factor(doy)
     gpp_unmasked = p_i * day_length_factor
-    frost_masked = frost_mask(t_day, t_night, frost_threshold_degc)
+    frost_masked = frost_mask(t_max, t_min, frost_threshold_degc)
 
     return {
         "t_mean": np.asarray(t_mean),

@@ -9,13 +9,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from conftest import SyntheticFluxnet, make_parameters
+from conftest import SyntheticFluxnet, make_parameters, synthetic_extremes
 from dalec.data_io import SiteData, build_site_data, load_fluxnet_dd
 from dalec.diagnostics import (
+    SUGGESTED_PEAK_OFFSET_DAYS,
     annual_gpp_comparison,
     canopy_efficiency_sweep,
     format_gpp_magnitude_report,
+    format_seasonal_timing_report,
     gpp_magnitude_gate,
+    seasonal_timing,
     temperature_proxy_comparison,
 )
 from dalec.model_numpy import run_dalec2
@@ -29,7 +32,10 @@ WELL_SCALED = 0.474
 def block(synthetic_fluxnet: SyntheticFluxnet) -> SiteData:
     """Two clean years from the synthetic FLUXNET file, with GPP products."""
     frame = load_fluxnet_dd(synthetic_fluxnet.path)
-    return build_site_data(frame, start_year=2000, end_year=2001, qc_threshold=0.75)
+    return build_site_data(
+        frame, start_year=2000, end_year=2001, qc_threshold=0.75,
+        daily_extremes=synthetic_extremes(pd.DatetimeIndex(frame.index)),
+    )
 
 
 def saturating_gpp(scale: float) -> Callable[..., float]:
@@ -79,7 +85,7 @@ def test_ratio_is_computed_on_matched_days_only(block: SiteData) -> None:
             **{
                 name: getattr(block, name)
                 for name in (
-                    "time", "doy", "t_air", "t_day", "t_night", "sw_in", "co2",
+                    "time", "doy", "t_air", "t_day", "t_night", "t_max", "t_min", "sw_in", "co2",
                     "nee_obs", "nee_unc", "nee_qc", "nee_mask", "attrs",
                 )
             },
@@ -98,7 +104,10 @@ def test_ratio_is_computed_on_matched_days_only(block: SiteData) -> None:
 
 def test_run_length_mismatch_raises(block: SiteData) -> None:
     frame = load_fluxnet_dd(block.attrs["source_file"])
-    shorter = build_site_data(frame, start_year=2000, end_year=2000)
+    shorter = build_site_data(
+        frame, start_year=2000, end_year=2000,
+        daily_extremes=synthetic_extremes(pd.DatetimeIndex(frame.index)),
+    )
     output = run_dalec2(make_parameters(), shorter, gpp_fn=saturating_gpp(WELL_SCALED))
 
     with pytest.raises(ValueError, match="same period"):
@@ -294,6 +303,76 @@ def test_gate_rejects_a_meaningless_lai_band(block: SiteData) -> None:
         gpp_magnitude_gate(
             make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED), lai_band=(8.0, 1.0)
         )
+
+
+# ---------------------------------------------------------------------------
+# Seasonal timing
+# ---------------------------------------------------------------------------
+
+
+def test_seasonal_timing_reports_every_series(block: SiteData) -> None:
+    output = run_dalec2(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    table = seasonal_timing(output, block)
+
+    assert list(table.index) == ["model", "gpp_nt", "gpp_dt"]
+    for column in ("peak_doy", "onset_doy", "cessation_doy", "season_length_days"):
+        assert (table[column] > 0).all(), column
+    assert (table["onset_doy"] < table["cessation_doy"]).all()
+
+
+def test_seasonal_timing_detects_a_deliberate_phase_shift(block: SiteData) -> None:
+    """The check the magnitude gate cannot do: roll the model and see it move."""
+    output = run_dalec2(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    aligned = seasonal_timing(output, block)
+
+    shifted = replace(output, gpp=np.roll(output.gpp, 30))
+    moved = seasonal_timing(shifted, block)
+
+    assert abs(int(moved.loc["model", "peak_offset_days"])) > abs(
+        int(aligned.loc["model", "peak_offset_days"])
+    )
+    assert int(moved.loc["model", "peak_doy"]) != int(aligned.loc["model", "peak_doy"])
+
+
+def test_a_phase_shift_barely_moves_the_annual_ratio(block: SiteData) -> None:
+    """Why the timing check has to exist separately from the magnitude gate."""
+    output = run_dalec2(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    shifted = replace(output, gpp=np.roll(output.gpp, 30))
+
+    before = annual_gpp_comparison(output, block)["gpp_model"].sum()
+    after = annual_gpp_comparison(shifted, block)["gpp_model"].sum()
+    assert after == pytest.approx(before, rel=0.02), (
+        "an annual integral is nearly blind to phase, which is the whole point"
+    )
+
+
+def test_the_products_define_the_reference_peak(block: SiteData) -> None:
+    output = run_dalec2(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    table = seasonal_timing(output, block)
+
+    product_offsets = table.loc[["gpp_nt", "gpp_dt"], "peak_offset_days"]
+    assert product_offsets.sum() == 0, "the two products straddle their own mean"
+
+
+def test_timing_report_states_that_it_is_not_enforced(block: SiteData) -> None:
+    output = run_dalec2(make_parameters(), block, gpp_fn=saturating_gpp(WELL_SCALED))
+    report = format_seasonal_timing_report(seasonal_timing(output, block))
+
+    assert "NOT ENFORCED" in report
+    assert "nearly blind to" in report
+    assert str(SUGGESTED_PEAK_OFFSET_DAYS) in report
+
+
+def test_timing_rejects_a_mismatched_run(block: SiteData) -> None:
+    frame = load_fluxnet_dd(block.attrs["source_file"])
+    shorter = build_site_data(
+        frame, start_year=2000, end_year=2000,
+        daily_extremes=synthetic_extremes(pd.DatetimeIndex(frame.index)),
+    )
+    output = run_dalec2(make_parameters(), shorter, gpp_fn=saturating_gpp(WELL_SCALED))
+
+    with pytest.raises(ValueError, match="same period"):
+        seasonal_timing(output, block)
 
 
 # ---------------------------------------------------------------------------

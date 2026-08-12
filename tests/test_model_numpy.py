@@ -364,8 +364,8 @@ def test_photosynthesis_receives_the_drivers_and_acm_parameters() -> None:
 
     first = calls[0]
     assert first["doy"] == int(drivers.doy[0])
-    assert first["t_day"] == pytest.approx(drivers.t_day[0])
-    assert first["t_night"] == pytest.approx(drivers.t_night[0])
+    assert first["t_max"] == pytest.approx(drivers.t_max[0])
+    assert first["t_min"] == pytest.approx(drivers.t_min[0])
     assert first["sw_in"] == pytest.approx(drivers.sw_in[0])
     assert first["co2"] == pytest.approx(drivers.co2[0])
     assert first["lma"] == params.lma
@@ -422,7 +422,7 @@ def test_unimplemented_photosynthesis_raises() -> None:
 
     with pytest.raises(NotImplementedError):
         gpp_not_implemented(
-            doy=1, t_day=1.0, t_night=0.0, sw_in=1.0, co2=380.0,
+            doy=1, t_max=1.0, t_min=0.0, sw_in=1.0, co2=380.0,
             c_fol=100.0, lma=60.0, ceff=15.0,
         )
 
@@ -446,8 +446,8 @@ def test_mismatched_driver_lengths_raise() -> None:
     broken = type(drivers)(
         doy=drivers.doy[:5],
         t_air=drivers.t_air,
-        t_day=drivers.t_day,
-        t_night=drivers.t_night,
+        t_max=drivers.t_max,
+        t_min=drivers.t_min,
         sw_in=drivers.sw_in,
         co2=drivers.co2,
     )
@@ -467,8 +467,8 @@ def test_non_finite_drivers_raise() -> None:
     broken = type(drivers)(
         doy=drivers.doy,
         t_air=t_air,
-        t_day=drivers.t_day,
-        t_night=drivers.t_night,
+        t_max=drivers.t_max,
+        t_min=drivers.t_min,
         sw_in=drivers.sw_in,
         co2=drivers.co2,
     )
@@ -484,8 +484,8 @@ def test_empty_driver_record_raises() -> None:
     empty = type(empty)(
         doy=np.array([], dtype=int),
         t_air=np.array([]),
-        t_day=np.array([]),
-        t_night=np.array([]),
+        t_max=np.array([]),
+        t_min=np.array([]),
         sw_in=np.array([]),
         co2=np.array([]),
     )

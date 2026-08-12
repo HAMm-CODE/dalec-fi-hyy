@@ -39,13 +39,16 @@ import xarray as xr
 
 __all__ = [
     "DRIVER_COLUMNS",
+    "EXTREME_COLUMNS",
     "MISSING_VALUE",
     "OBSERVATION_COLUMNS",
     "PARTITIONED_COLUMNS",
     "SW_W_M2_TO_MJ_M2_DAY",
+    "TEMPERATURE_SOURCES",
     "SiteData",
     "build_site_data",
     "coverage_table",
+    "load_daily_extremes",
     "load_fluxnet_dd",
     "load_site_data",
     "sw_in_to_mj_per_day",
@@ -68,10 +71,11 @@ TIMESTAMP_COLUMN: Final[str] = "TIMESTAMP"
 
 #: Driver columns. Day of year is derived from TIMESTAMP rather than read.
 #:
-#: TA_F_DAY and TA_F_NIGHT stand in for the daily maximum and minimum air
-#: temperature that the ACM photosynthesis routine expects. They are the mean
-#: daytime and mean nighttime air temperature, which is a damped version of the
-#: min/max pair; the substitution is a deliberate, locked design decision.
+#: TA_F_DAY and TA_F_NIGHT are the mean daytime and mean nighttime air
+#: temperature. They were used as stand-ins for the daily maximum and minimum
+#: that ACM expects; they are **no longer** the default source for those --
+#: see :func:`load_daily_extremes` -- but they are still loaded, because the
+#: comparison between proxy and truth is a recorded result.
 #:
 #: VPD_F is deliberately absent and must stay absent.
 DRIVER_COLUMNS: Final[dict[str, str]] = {
@@ -81,6 +85,25 @@ DRIVER_COLUMNS: Final[dict[str, str]] = {
     "sw_in": "SW_IN_F",
     "co2": "CO2_F_MDS",
 }
+
+#: Where the daily temperature extremes come from.
+#:
+#: ``"extremes"``
+#:     True daily maximum and minimum, derived from the half-hourly product by
+#:     ``scripts/01b_derive_tminmax.py``. The default, and the only source that
+#:     should reach a published result.
+#: ``"day_night_proxy"``
+#:     ``TA_F_DAY`` and ``TA_F_NIGHT``. Retained deliberately as the comparison
+#:     baseline for ``dalec.diagnostics.temperature_proxy_comparison``, and
+#:     reachable only by asking for it explicitly. Measured over 1997-2005 the
+#:     proxy range correlates 0.641 with the truth and understates it by
+#:     4.79 degC -- the daytime mean is 2.51 degC below the true maximum and the
+#:     nighttime mean 2.28 degC above the true minimum, and those biases compound
+#:     in the difference.
+TEMPERATURE_SOURCES: Final[tuple[str, str]] = ("extremes", "day_night_proxy")
+
+#: Columns expected in the derived daily-extremes file.
+EXTREME_COLUMNS: Final[tuple[str, ...]] = ("t_max", "t_min")
 
 #: Assimilation target and its metadata. NEE_VUT_REF only.
 OBSERVATION_COLUMNS: Final[dict[str, str]] = {
@@ -162,9 +185,21 @@ class SiteData:
     t_air
         Daily mean air temperature, degrees C (``TA_F``).
     t_day
-        Daily mean daytime air temperature, degrees C (``TA_F_DAY``).
+        Daily mean daytime air temperature, degrees C (``TA_F_DAY``). Retained
+        as the comparison baseline only -- photosynthesis reads ``t_max``.
     t_night
-        Daily mean nighttime air temperature, degrees C (``TA_F_NIGHT``).
+        Daily mean nighttime air temperature, degrees C (``TA_F_NIGHT``). As
+        ``t_day``: baseline only.
+    t_max, t_min
+        Daily maximum and minimum air temperature, degrees C. What the ACM
+        photosynthesis routine reads, for both its ``exp(a8 * Tmax)`` term and
+        the daily range. True extremes by default, derived from the half-hourly
+        product; ``t_max - t_min`` is then non-negative by construction.
+
+        **Three distinct temperatures live in this record and confusing them is
+        silent.** Decomposition and respiration read ``t_air``, the daily mean.
+        Photosynthesis reads ``t_max`` and ``t_min``. ``t_day`` and ``t_night``
+        reach neither.
     sw_in
         Daily total incoming shortwave radiation, MJ m-2 d-1 (``SW_IN_F``,
         converted from W m-2 on load).
@@ -192,6 +227,8 @@ class SiteData:
     t_air: np.ndarray
     t_day: np.ndarray
     t_night: np.ndarray
+    t_max: np.ndarray
+    t_min: np.ndarray
     sw_in: np.ndarray
     co2: np.ndarray
     nee_obs: np.ndarray
@@ -257,6 +294,8 @@ class SiteData:
             "t_air": "degC",
             "t_day": "degC",
             "t_night": "degC",
+            "t_max": "degC",
+            "t_min": "degC",
             "sw_in": "MJ m-2 d-1",
             "co2": "umol mol-1",
             "nee_obs": "g C m-2 d-1",
@@ -300,6 +339,8 @@ class SiteData:
             t_air=dataset["t_air"].to_numpy().astype(float),
             t_day=dataset["t_day"].to_numpy().astype(float),
             t_night=dataset["t_night"].to_numpy().astype(float),
+            t_max=dataset["t_max"].to_numpy().astype(float),
+            t_min=dataset["t_min"].to_numpy().astype(float),
             sw_in=dataset["sw_in"].to_numpy().astype(float),
             co2=dataset["co2"].to_numpy().astype(float),
             nee_obs=dataset["nee_obs"].to_numpy().astype(float),
@@ -531,6 +572,69 @@ def _check_drivers_complete(frame: pd.DataFrame) -> None:
         )
 
 
+def load_daily_extremes(path: str | Path) -> pd.DataFrame:
+    """Read the derived daily temperature extremes written by ``01b``.
+
+    Parameters
+    ----------
+    path
+        CSV written by ``scripts/01b_derive_tminmax.py``, indexed by date with
+        ``t_max`` and ``t_min`` columns.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by ``DatetimeIndex``.
+
+    Raises
+    ------
+    ValueError
+        If a required column is missing, or any range is negative -- which
+        cannot happen from a genuine maximum and minimum over the same day, so
+        it means the file was not produced the way it claims.
+    """
+    frame = pd.read_csv(path, index_col=0)
+    frame.index = pd.to_datetime(frame.index)
+    missing = [name for name in EXTREME_COLUMNS if name not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"{path} is missing {missing}; expected a file written by "
+            "scripts/01b_derive_tminmax.py"
+        )
+    negative = int((frame["t_max"] < frame["t_min"]).sum())
+    if negative:
+        raise ValueError(
+            f"{path} has {negative} day(s) where t_max is below t_min. A range "
+            "taken from one day's maximum and minimum cannot be negative, so "
+            "this file was not produced as claimed."
+        )
+    return frame
+
+
+def _extremes_for_block(
+    extremes: pd.DataFrame, index: pd.DatetimeIndex
+) -> tuple[np.ndarray, np.ndarray]:
+    """Align the derived extremes onto the block, refusing to guess at gaps."""
+    aligned = extremes.reindex(index.normalize())
+    absent = aligned["t_max"].isna() | aligned["t_min"].isna()
+    count = int(absent.sum())
+    if count:
+        examples = ", ".join(str(d.date()) for d in index[absent.to_numpy()][:5])
+        suffix = ", ..." if count > 5 else ""
+        raise ValueError(
+            f"the derived daily extremes cover only part of this block: "
+            f"{count} day(s) have no matching row [{examples}{suffix}]. "
+            "Re-run scripts/01b_derive_tminmax.py over a period that spans the "
+            "block, or pass temperature_source='day_night_proxy' to fall back "
+            "to TA_F_DAY/TA_F_NIGHT -- knowing that the proxy understates the "
+            "daily range by about 4.8 degC at this site."
+        )
+    return (
+        aligned["t_max"].to_numpy(dtype=float),
+        aligned["t_min"].to_numpy(dtype=float),
+    )
+
+
 def build_site_data(
     frame: pd.DataFrame,
     *,
@@ -538,6 +642,8 @@ def build_site_data(
     end_year: int,
     qc_threshold: float = 0.75,
     site_code: str = "",
+    daily_extremes: pd.DataFrame | None = None,
+    temperature_source: str = "extremes",
 ) -> SiteData:
     """Slice a contiguous inclusive year range and assemble model-ready arrays.
 
@@ -555,6 +661,13 @@ def build_site_data(
         Minimum ``NEE_VUT_REF_QC`` fraction for a day to enter the likelihood.
     site_code
         Recorded in the output provenance attributes.
+    daily_extremes
+        Output of :func:`load_daily_extremes`. Required unless
+        ``temperature_source`` is ``"day_night_proxy"``.
+    temperature_source
+        One of :data:`TEMPERATURE_SOURCES`. Defaults to the true extremes; the
+        proxy has to be asked for by name, because it understates the daily
+        range fourfold at this site and no published result should rest on it.
 
     Returns
     -------
@@ -563,9 +676,22 @@ def build_site_data(
     Raises
     ------
     ValueError
-        If the range is empty, is not fully covered by the file, or contains a
-        driver gap.
+        If the range is empty, is not fully covered by the file, contains a
+        driver gap, or the requested temperature source is unavailable.
     """
+    if temperature_source not in TEMPERATURE_SOURCES:
+        raise ValueError(
+            f"temperature_source must be one of {TEMPERATURE_SOURCES}, "
+            f"got {temperature_source!r}"
+        )
+    if temperature_source == "extremes" and daily_extremes is None:
+        raise ValueError(
+            "temperature_source='extremes' needs daily_extremes, which comes "
+            "from scripts/01b_derive_tminmax.py via load_daily_extremes(). Pass "
+            "temperature_source='day_night_proxy' to use TA_F_DAY/TA_F_NIGHT "
+            "instead -- that is the comparison baseline, not a substitute: it "
+            "understates the daily temperature range by about 4.8 degC here."
+        )
     if end_year < start_year:
         raise ValueError(f"end_year {end_year} is before start_year {start_year}")
 
@@ -590,6 +716,14 @@ def build_site_data(
     index = pd.DatetimeIndex(selection.index)
     mask = _likelihood_mask(selection, qc_threshold)
 
+    t_day = selection[DRIVER_COLUMNS["t_day"]].to_numpy(dtype=float)
+    t_night = selection[DRIVER_COLUMNS["t_night"]].to_numpy(dtype=float)
+    if temperature_source == "extremes":
+        assert daily_extremes is not None  # guarded above
+        t_max, t_min = _extremes_for_block(daily_extremes, index)
+    else:
+        t_max, t_min = t_day, t_night
+
     partitioned = {
         short_name: selection[column].to_numpy(dtype=float)
         for short_name, column in PARTITIONED_COLUMNS.items()
@@ -605,6 +739,7 @@ def build_site_data(
         "n_days": len(selection),
         "n_assimilated": int(mask.sum()),
         "sw_conversion_factor_w_m2_to_mj_m2_day": SW_W_M2_TO_MJ_M2_DAY,
+        "temperature_source": temperature_source,
         "assimilation_target": OBSERVATION_COLUMNS["nee_obs"],
         "note": (
             "Partitioned GPP/RECO products are stored for posterior consistency "
@@ -616,8 +751,10 @@ def build_site_data(
         time=index.to_numpy(),
         doy=index.dayofyear.to_numpy().astype(int),
         t_air=selection[DRIVER_COLUMNS["t_air"]].to_numpy(dtype=float),
-        t_day=selection[DRIVER_COLUMNS["t_day"]].to_numpy(dtype=float),
-        t_night=selection[DRIVER_COLUMNS["t_night"]].to_numpy(dtype=float),
+        t_day=t_day,
+        t_night=t_night,
+        t_max=t_max,
+        t_min=t_min,
         # W m-2 daily mean -> MJ m-2 d-1 daily total.
         sw_in=sw_in_to_mj_per_day(selection[DRIVER_COLUMNS["sw_in"]].to_numpy(dtype=float)),
         co2=selection[DRIVER_COLUMNS["co2"]].to_numpy(dtype=float),
@@ -637,16 +774,23 @@ def load_site_data(
     end_year: int,
     qc_threshold: float = 0.75,
     site_code: str = "",
+    extremes_file: str | Path | None = None,
+    temperature_source: str = "extremes",
 ) -> SiteData:
     """Load a FLUXNET DD csv and return model-ready arrays for a year range.
 
     Convenience wrapper over :func:`load_fluxnet_dd` and :func:`build_site_data`.
+    ``extremes_file`` is the csv from ``scripts/01b_derive_tminmax.py``, required
+    unless ``temperature_source`` is ``"day_night_proxy"``.
     """
     frame = load_fluxnet_dd(path)
+    extremes = load_daily_extremes(extremes_file) if extremes_file is not None else None
     return build_site_data(
         frame,
         start_year=start_year,
         end_year=end_year,
         qc_threshold=qc_threshold,
         site_code=site_code,
+        daily_extremes=extremes,
+        temperature_source=temperature_source,
     )

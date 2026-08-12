@@ -116,9 +116,11 @@ class Drivers(Protocol):
     t_air
         Daily mean air temperature, degrees C. Drives decomposition through
         ``exp(temperature_exponent * t_air)`` in A5 and A6.
-    t_day, t_night
-        Daily mean daytime and nighttime air temperature, degrees C. Consumed
-        by the photosynthesis routine, not by A1-A6.
+    t_max, t_min
+        Daily maximum and minimum air temperature, degrees C. Consumed by the
+        photosynthesis routine, **never** by A1-A6 -- decomposition reads
+        ``t_air`` and nothing else. Three distinct temperatures reach this model
+        and confusing them is silent, so the separation is asserted in a test.
     sw_in
         Daily total incoming shortwave radiation, MJ m-2 d-1.
     co2
@@ -140,13 +142,13 @@ class Drivers(Protocol):
         ...
 
     @property
-    def t_day(self) -> np.ndarray:
-        """Daily mean daytime air temperature, degrees C."""
+    def t_max(self) -> np.ndarray:
+        """Daily maximum air temperature, degrees C. Photosynthesis only."""
         ...
 
     @property
-    def t_night(self) -> np.ndarray:
-        """Daily mean nighttime air temperature, degrees C."""
+    def t_min(self) -> np.ndarray:
+        """Daily minimum air temperature, degrees C. Photosynthesis only."""
         ...
 
     @property
@@ -170,8 +172,8 @@ class GppModel(Protocol):
         self,
         *,
         doy: int,
-        t_day: float,
-        t_night: float,
+        t_max: float,
+        t_min: float,
         sw_in: float,
         co2: float,
         c_fol: float,
@@ -207,8 +209,8 @@ class PhenologyModel(Protocol):
 def gpp_not_implemented(
     *,
     doy: int,
-    t_day: float,
-    t_night: float,
+    t_max: float,
+    t_min: float,
     sw_in: float,
     co2: float,
     c_fol: float,
@@ -535,7 +537,7 @@ def run_dalec2(
         non-finite values. A single NaN driver silently contaminates every pool
         from that day onward, so it is rejected up front rather than propagated.
     """
-    driver_names = ("doy", "t_air", "t_day", "t_night", "sw_in", "co2")
+    driver_names = ("doy", "t_air", "t_max", "t_min", "sw_in", "co2")
     arrays = {name: np.asarray(getattr(drivers, name)) for name in driver_names}
 
     lengths = {name: array.shape[0] for name, array in arrays.items()}
@@ -565,8 +567,8 @@ def run_dalec2(
 
     doy = arrays["doy"]
     t_air = arrays["t_air"]
-    t_day = arrays["t_day"]
-    t_night = arrays["t_night"]
+    t_max = arrays["t_max"]
+    t_min = arrays["t_min"]
     sw_in = arrays["sw_in"]
     co2 = arrays["co2"]
 
@@ -586,8 +588,8 @@ def run_dalec2(
         # simultaneous update of A1-A6.
         daily_gpp = gpp_fn(
             doy=int(doy[step]),
-            t_day=float(t_day[step]),
-            t_night=float(t_night[step]),
+            t_max=float(t_max[step]),
+            t_min=float(t_min[step]),
             sw_in=float(sw_in[step]),
             co2=float(co2[step]),
             c_fol=float(state[POOL_NAMES.index("c_fol")]),

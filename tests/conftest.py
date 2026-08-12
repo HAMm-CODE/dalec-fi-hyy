@@ -87,6 +87,29 @@ def _build_frame() -> pd.DataFrame:
     return frame
 
 
+def synthetic_extremes(index: pd.DatetimeIndex) -> pd.DataFrame:
+    """Stand-in for the derived daily extremes from ``01b_derive_tminmax.py``.
+
+    Deliberately *wider* than the day/night proxy the synthetic file carries
+    (which is TA_F +/- 2.5), and seasonally varying, so a test cannot pass by
+    confusing the two. The range is non-negative by construction, as a real
+    maximum-minus-minimum always is.
+    """
+    doy = index.dayofyear.to_numpy()
+    half = 5.0 + 2.0 * np.sin(2.0 * np.pi * doy / 365.25)
+    mean = 4.0 + 14.0 * np.sin(2.0 * np.pi * (doy - 100) / 365.25)
+    return pd.DataFrame(
+        {
+            "t_max": mean + half,
+            "t_min": mean - half,
+            "t_range": 2.0 * half,
+            "n_halfhours": np.full(len(index), 48),
+            "reliable": np.full(len(index), True),
+        },
+        index=index,
+    )
+
+
 @pytest.fixture(scope="session")
 def synthetic_fluxnet(tmp_path_factory: pytest.TempPathFactory) -> SyntheticFluxnet:
     """Write a synthetic FLUXNET2015 FULLSET DD csv and return its path."""
@@ -158,8 +181,8 @@ class StubDrivers:
 
     doy: np.ndarray
     t_air: np.ndarray
-    t_day: np.ndarray
-    t_night: np.ndarray
+    t_max: np.ndarray
+    t_min: np.ndarray
     sw_in: np.ndarray
     co2: np.ndarray
 
@@ -177,8 +200,8 @@ def make_drivers(n_days: int, *, seed: int = 0, constant_t_air: float | None = N
     return StubDrivers(
         doy=doy,
         t_air=t_air,
-        t_day=t_air + 2.5,
-        t_night=t_air - 2.5,
+        t_max=t_air + 2.5,
+        t_min=t_air - 2.5,
         sw_in=np.clip(9.0 + 8.0 * seasonal, 0.05, None),
         co2=380.0 + 0.005 * np.arange(n_days),
     )
