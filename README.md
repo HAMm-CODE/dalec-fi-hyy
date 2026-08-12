@@ -19,7 +19,8 @@ Diagnostics and figures are deliverables in their own right, not afterthoughts.
 
 The full record — these decisions, the four corrections to the published papers,
 the resolved constants and the known structural problems — is in
-[DECISIONS.md](DECISIONS.md).
+[DECISIONS.md](DECISIONS.md). Every known limitation, whether the literature has
+solved it, and our position on each is in [LIMITATIONS.md](LIMITATIONS.md).
 
 | | |
 |---|---|

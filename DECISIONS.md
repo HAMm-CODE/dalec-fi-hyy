@@ -9,6 +9,9 @@ Nothing here is new. It is collected from the module docstrings, code comments,
 `config/default.yaml` and `README.md`, which remain the authoritative sources.
 Where this file and the code disagree, the code is right and this file is stale.
 
+Limitations — what is wrong, whether the literature has solved it, and our
+position on each — live separately in [LIMITATIONS.md](LIMITATIONS.md).
+
 ---
 
 ## 1. Locked design decisions
