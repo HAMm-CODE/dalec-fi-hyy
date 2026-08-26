@@ -10,14 +10,18 @@ import pandas as pd
 import pytest
 
 from conftest import SyntheticFluxnet, make_parameters, synthetic_extremes
-from dalec.data_io import SiteData, build_site_data, load_fluxnet_dd
+from dalec.data_io import MISSING_VALUE, SiteData, build_site_data, load_fluxnet_dd
 from dalec.diagnostics import (
+    HALFHOURS_PER_DAY,
     SUGGESTED_PEAK_OFFSET_DAYS,
     annual_gpp_comparison,
+    binned_median_iqr,
     canopy_efficiency_sweep,
     format_gpp_magnitude_report,
     format_seasonal_timing_report,
     gpp_magnitude_gate,
+    randunc_audit,
+    randunc_relationships,
     seasonal_timing,
     temperature_proxy_comparison,
 )
@@ -453,3 +457,159 @@ def test_sweep_carries_lai_alongside_gpp(block: SiteData) -> None:
 
     assert (sweep["lai_max"] >= sweep["lai_mean"]).all()
     assert (sweep["lai_mean"] > 0.0).all()
+
+
+# ---------------------------------------------------------------------------
+# Task 4 -- RANDUNC characterisation
+# ---------------------------------------------------------------------------
+
+
+def _randunc_frame(
+    n_days: int = 400, *, missing: slice | None = None, sentinel: bool = False
+) -> pd.DataFrame:
+    """A minimal FLUXNET-shaped frame with known answers."""
+    index = pd.date_range("2000-01-01", periods=n_days, freq="D", name="time")
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame(
+        {
+            "NEE_VUT_REF": rng.normal(0.0, 2.0, n_days),
+            "NEE_VUT_REF_QC": np.linspace(0.0, 1.0, n_days).round(6),
+            "NEE_VUT_REF_RANDUNC": rng.uniform(0.05, 0.4, n_days),
+        },
+        index=index,
+    )
+    if missing is not None:
+        frame.iloc[missing, frame.columns.get_loc("NEE_VUT_REF_RANDUNC")] = (
+            MISSING_VALUE if sentinel else np.nan
+        )
+    return frame
+
+
+def test_randunc_audit_counts_are_exact() -> None:
+    frame = _randunc_frame(n_days=400, missing=slice(10, 40))
+    audit = randunc_audit(frame, qc_threshold=0.75, calibration_years=(2000, 2000))
+
+    assert audit.total_days == 400
+    assert audit.valid_nee == 400
+    assert audit.valid_nee_missing_unc == 30
+    assert audit.valid_nee_zero_unc == 0
+    # QC rises linearly from 0 to 1, so exactly the top quarter clears 0.75.
+    assert audit.qc_pass == int((frame["NEE_VUT_REF_QC"] >= 0.75).sum())
+
+
+def test_randunc_audit_separates_missing_from_zero() -> None:
+    """A missing sigma and a zero sigma assert different things."""
+    frame = _randunc_frame(n_days=100)
+    frame.iloc[0, frame.columns.get_loc("NEE_VUT_REF_RANDUNC")] = 0.0
+    frame.iloc[1, frame.columns.get_loc("NEE_VUT_REF_RANDUNC")] = np.nan
+    audit = randunc_audit(frame, qc_threshold=0.0)
+
+    assert audit.valid_nee_zero_unc == 1
+    assert audit.valid_nee_missing_unc == 1
+    # Both are unusable, so both are counted against the likelihood.
+    assert audit.qc_pass_no_sigma == 2
+
+
+def test_randunc_sentinel_conversion(tmp_path) -> None:
+    """-9999 must become NaN on load and be excluded from every statistic."""
+    frame = _randunc_frame(n_days=120, missing=slice(0, 20), sentinel=True)
+    # Straight from the raw frame the sentinel is a huge negative number...
+    assert frame["NEE_VUT_REF_RANDUNC"].min() == MISSING_VALUE
+    # ...and once converted, as load_fluxnet_dd does, it is simply absent.
+    converted = frame.replace(MISSING_VALUE, np.nan)
+    audit = randunc_audit(converted, qc_threshold=0.0)
+    assert audit.valid_nee_missing_unc == 20
+    assert audit.valid_nee_zero_unc == 0
+    fits = randunc_relationships(converted)
+    assert fits.on_abs_nee.n == 100, "sentinel days must not enter the fit"
+
+
+def test_audit_reports_contiguous_blocks_not_scattered_days() -> None:
+    frame = _randunc_frame(n_days=200, missing=slice(50, 60))
+    frame.iloc[120, frame.columns.get_loc("NEE_VUT_REF_RANDUNC")] = np.nan
+    audit = randunc_audit(frame, qc_threshold=0.0)
+
+    blocks = audit.missing_blocks
+    assert len(blocks) == 2
+    assert list(blocks["days"]) == [10, 1]
+    assert int(blocks["days"].sum()) == audit.qc_pass_no_sigma
+
+
+def test_audit_restricts_the_block_count_to_the_calibration_years() -> None:
+    frame = _randunc_frame(n_days=800, missing=slice(0, 30))
+    inside = randunc_audit(frame, qc_threshold=0.0, calibration_years=(2000, 2000))
+    outside = randunc_audit(frame, qc_threshold=0.0, calibration_years=(2001, 2001))
+
+    assert inside.qc_pass_no_sigma_in_block == 30
+    assert outside.qc_pass_no_sigma_in_block == 0
+    assert inside.qc_pass_no_sigma == outside.qc_pass_no_sigma == 30
+
+
+def test_qc_multiple_of_halfhour_detection() -> None:
+    """QC * 48 is an exact half-hour count only if every value is a multiple."""
+    exact = _randunc_frame(n_days=49)
+    exact["NEE_VUT_REF_QC"] = np.arange(49) / 48.0
+    assert randunc_audit(exact, qc_threshold=0.0).qc_is_multiple_of_halfhour
+
+    ragged = _randunc_frame(n_days=49)
+    ragged["NEE_VUT_REF_QC"] = np.linspace(0.0, 1.0, 49) + 0.001
+    assert not randunc_audit(ragged, qc_threshold=0.0).qc_is_multiple_of_halfhour
+
+
+def test_relationships_recover_a_planted_sqrt_n_law() -> None:
+    """If sigma really is the SE of a mean, the log-log slope must come back -0.5.
+
+    This is the positive control for the headline result: without it, a slope
+    near zero could just mean the metric is broken.
+    """
+    n_days = 480
+    index = pd.date_range("2000-01-01", periods=n_days, freq="D", name="time")
+    qc = np.tile(np.arange(1, 49) / 48.0, n_days // 48)
+    # |NEE| varies but sigma does not depend on it: the planted law is purely
+    # 1/sqrt(n). A constant NEE would make the |NEE| regression degenerate and
+    # exercise a numerically ill-conditioned path that says nothing useful.
+    rng = np.random.default_rng(3)
+    frame = pd.DataFrame(
+        {
+            "NEE_VUT_REF": rng.uniform(0.5, 5.0, n_days),
+            "NEE_VUT_REF_QC": qc,
+            "NEE_VUT_REF_RANDUNC": 1.0 / np.sqrt(qc * HALFHOURS_PER_DAY),
+        },
+        index=index,
+    )
+    fits = randunc_relationships(frame)
+
+    assert fits.log_log_slope == pytest.approx(-0.5, abs=1e-6)
+    assert fits.on_inv_sqrt_n.r_squared == pytest.approx(1.0, abs=1e-6)
+
+
+def test_relationships_reject_a_magnitude_proportional_law() -> None:
+    """The negative control: sigma tied to |NEE| gives no 1/sqrt(n) signal."""
+    n_days = 480
+    index = pd.date_range("2000-01-01", periods=n_days, freq="D", name="time")
+    rng = np.random.default_rng(7)
+    nee = rng.uniform(0.5, 5.0, n_days)
+    frame = pd.DataFrame(
+        {
+            "NEE_VUT_REF": nee,
+            "NEE_VUT_REF_QC": np.tile(np.arange(1, 49) / 48.0, n_days // 48),
+            "NEE_VUT_REF_RANDUNC": 0.08 + 0.05 * nee,
+        },
+        index=index,
+    )
+    fits = randunc_relationships(frame)
+
+    assert abs(fits.log_log_slope) < 0.1
+    assert fits.on_abs_nee.r_squared == pytest.approx(1.0, abs=1e-6)
+    assert abs(fits.partial_r_given_abs_nee) < 0.05
+
+
+def test_binned_median_iqr_drops_empty_bins_and_orders_quartiles() -> None:
+    x = np.array([0.1, 0.2, 0.9, 0.95])
+    y = np.array([1.0, 3.0, 10.0, 20.0])
+    table = binned_median_iqr(x, y, np.array([0.0, 0.5, 0.8, 1.0]))
+
+    assert len(table) == 2, "the 0.5-0.8 bin is empty and must be dropped"
+    assert (table["q25"] <= table["median"]).all()
+    assert (table["median"] <= table["q75"]).all()
+    assert list(table["n"]) == [2, 2]

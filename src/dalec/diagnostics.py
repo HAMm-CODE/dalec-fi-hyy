@@ -85,13 +85,20 @@ from dalec.parameters import DalecParameters, prior_bounds
 
 __all__ = [
     "DEFAULT_LAI_BAND",
+    "HALFHOURS_PER_DAY",
     "GppMagnitudeGate",
+    "LinearFit",
+    "RanduncAudit",
+    "RanduncFits",
     "annual_gpp_comparison",
+    "binned_median_iqr",
     "calibration_bound_coverage",
     "canopy_efficiency_sweep",
     "format_gpp_magnitude_report",
     "format_seasonal_timing_report",
     "gpp_magnitude_gate",
+    "randunc_audit",
+    "randunc_relationships",
     "seasonal_timing",
     "shoulder_season_gpp",
     "temperature_proxy_comparison",
@@ -887,3 +894,273 @@ def calibration_bound_coverage(site_data: SiteData) -> pd.DataFrame:
         )
 
     return pd.DataFrame(rows).set_index("quantity")
+
+
+# ---------------------------------------------------------------------------
+# Task 4 -- characterising NEE_VUT_REF_RANDUNC
+#
+# Purely descriptive analysis of the data file. No model involved.
+#
+# RANDUNC is the per-day standard deviation of the Gaussian likelihood, so what
+# it actually represents decides what the likelihood actually asserts. The
+# question these functions answer is whether it behaves like the standard error
+# of a daily mean assembled from n half-hourly values -- in which case it is an
+# estimate of within-day variability rather than a known measurement error.
+# ---------------------------------------------------------------------------
+
+#: Half-hourly records in a complete day. ``NEE_VUT_REF_QC`` is the fraction of
+#: the day that was measured or good-quality gap-filled, and it takes exactly 49
+#: distinct values, all multiples of 1/48 -- so ``QC * 48`` recovers the number
+#: of contributing half-hours **exactly**, not approximately.
+HALFHOURS_PER_DAY: Final[int] = 48
+
+
+@dataclass(frozen=True)
+class RanduncAudit:
+    """Counts from the data audit.
+
+    Attributes
+    ----------
+    total_days, valid_nee, qc_pass
+        Record length, days with a non-missing ``NEE_VUT_REF``, and days whose
+        ``NEE_VUT_REF_QC`` meets the threshold.
+    valid_nee_missing_unc, valid_nee_zero_unc
+        Days with a usable NEE but no usable standard deviation. Kept apart
+        because they assert different things: missing is an absent estimate,
+        zero would be a claim of perfect measurement. Only the first occurs here.
+    qc_pass_no_sigma
+        Days that pass QC yet still cannot enter the likelihood, because sigma is
+        missing or non-positive. **The operative number**: each is a day the
+        Gaussian likelihood cannot evaluate as specified.
+    qc_pass_no_sigma_in_block
+        The subset of those inside the calibration block, which is the only part
+        affecting this calibration.
+    calibration_years
+        Inclusive year bounds used for the field above.
+    missing_blocks
+        Contiguous runs of days with no usable sigma: ``start``, ``end``, ``days``.
+    qc_levels, qc_is_multiple_of_halfhour
+        Number of distinct QC values, and whether every one is a multiple of
+        1/48. If so, ``QC * 48`` is an exact half-hour count.
+    """
+
+    total_days: int
+    valid_nee: int
+    qc_pass: int
+    valid_nee_missing_unc: int
+    valid_nee_zero_unc: int
+    qc_pass_no_sigma: int
+    qc_pass_no_sigma_in_block: int
+    calibration_years: tuple[int, int]
+    missing_blocks: pd.DataFrame
+    qc_levels: int
+    qc_is_multiple_of_halfhour: bool
+
+
+def _contiguous_blocks(index: pd.DatetimeIndex, flag: np.ndarray) -> pd.DataFrame:
+    """Contiguous runs of True in ``flag``, as start/end dates and lengths."""
+    if not flag.any():
+        return pd.DataFrame(columns=["start", "end", "days"])
+    positions = np.flatnonzero(flag)
+    breaks = np.flatnonzero(np.diff(positions) > 1)
+    starts = np.concatenate(([positions[0]], positions[breaks + 1]))
+    ends = np.concatenate((positions[breaks], [positions[-1]]))
+    return pd.DataFrame(
+        {
+            "start": [index[s].date() for s in starts],
+            "end": [index[e].date() for e in ends],
+            "days": (ends - starts + 1).astype(int),
+        }
+    )
+
+
+def randunc_audit(
+    frame: pd.DataFrame,
+    *,
+    qc_threshold: float = 0.75,
+    calibration_years: tuple[int, int] = (1997, 2005),
+) -> RanduncAudit:
+    """Audit the assimilation target and its uncertainty column.
+
+    Parameters
+    ----------
+    frame
+        Output of :func:`dalec.data_io.load_fluxnet_dd`, which has already
+        replaced the ``-9999`` sentinel with NaN and parsed the timestamps.
+    qc_threshold
+        Minimum ``NEE_VUT_REF_QC`` for a day to count as passing.
+    calibration_years
+        Inclusive year bounds of the calibration block.
+
+    Returns
+    -------
+    RanduncAudit
+    """
+    nee = frame["NEE_VUT_REF"].to_numpy(dtype=float)
+    unc = frame["NEE_VUT_REF_RANDUNC"].to_numpy(dtype=float)
+    qc = frame["NEE_VUT_REF_QC"].to_numpy(dtype=float)
+    index = pd.DatetimeIndex(frame.index)
+
+    with np.errstate(invalid="ignore"):
+        has_nee = np.isfinite(nee)
+        passes_qc = has_nee & np.isfinite(qc) & (qc >= qc_threshold)
+        # Mirrors dalec.data_io._likelihood_mask: a zero or missing sd has no
+        # valid Gaussian. The zero branch is kept as a guard even though this
+        # record contains none.
+        usable_sigma = np.isfinite(unc) & (unc > 0.0)
+
+    no_sigma = passes_qc & ~usable_sigma
+    years = np.asarray(index.year)
+    in_block = (years >= calibration_years[0]) & (years <= calibration_years[1])
+
+    qc_values = qc[np.isfinite(qc)]
+    scaled = qc_values * HALFHOURS_PER_DAY
+
+    return RanduncAudit(
+        total_days=len(frame),
+        valid_nee=int(has_nee.sum()),
+        qc_pass=int(passes_qc.sum()),
+        valid_nee_missing_unc=int((has_nee & ~np.isfinite(unc)).sum()),
+        valid_nee_zero_unc=int((has_nee & np.isfinite(unc) & (unc == 0.0)).sum()),
+        qc_pass_no_sigma=int(no_sigma.sum()),
+        qc_pass_no_sigma_in_block=int((no_sigma & in_block).sum()),
+        calibration_years=calibration_years,
+        missing_blocks=_contiguous_blocks(index, no_sigma),
+        qc_levels=int(np.unique(qc_values).size),
+        qc_is_multiple_of_halfhour=bool(np.allclose(scaled, np.round(scaled))),
+    )
+
+
+@dataclass(frozen=True)
+class LinearFit:
+    """Ordinary least squares of ``y`` on ``x``, with the sample size."""
+
+    slope: float
+    intercept: float
+    r_squared: float
+    n: int
+
+
+def _ols(x: np.ndarray, y: np.ndarray) -> LinearFit:
+    from scipy import stats
+
+    result = stats.linregress(x, y)
+    return LinearFit(
+        slope=float(result.slope),
+        intercept=float(result.intercept),
+        r_squared=float(result.rvalue**2),
+        n=int(x.size),
+    )
+
+
+def binned_median_iqr(x: np.ndarray, y: np.ndarray, edges: np.ndarray) -> pd.DataFrame:
+    """Median and interquartile range of ``y`` within bins of ``x``.
+
+    One row per non-empty bin: ``centre``, ``median``, ``q25``, ``q75``, ``n``.
+    Empty bins are dropped rather than returned as NaN.
+    """
+    which = np.digitize(x, edges) - 1
+    rows = []
+    for bin_index in range(len(edges) - 1):
+        selected = y[which == bin_index]
+        if selected.size == 0:
+            continue
+        rows.append(
+            {
+                "centre": 0.5 * (edges[bin_index] + edges[bin_index + 1]),
+                "median": float(np.median(selected)),
+                "q25": float(np.percentile(selected, 25)),
+                "q75": float(np.percentile(selected, 75)),
+                "n": int(selected.size),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+@dataclass(frozen=True)
+class RanduncFits:
+    """The two regressions that carry the argument, plus the relative scale.
+
+    Attributes
+    ----------
+    on_abs_nee
+        RANDUNC regressed on ``|NEE|``. **Descriptive only** -- see the
+        circularity caveat: this must never be substituted into the likelihood.
+    on_inv_sqrt_n
+        RANDUNC regressed on ``1/sqrt(n)`` with ``n = QC * 48``. If RANDUNC is
+        the standard error of a daily mean over ``n`` half-hours it scales as
+        ``1/sqrt(n)``, so a close-to-linear fit through the origin is direct
+        evidence for that reading.
+    log_log_slope
+        Slope of ``log(RANDUNC)`` on ``log(n)``. **The decisive statistic**, and
+        the one that does not depend on how the panel is binned: the standard
+        error of a mean over ``n`` values scales as ``n**-0.5``, so this should
+        be -0.5 if that is what RANDUNC is.
+    partial_r_given_abs_nee
+        Correlation between RANDUNC and ``1/sqrt(n)`` after linearly removing
+        ``|NEE|`` from both. Separates any apparent ``n`` dependence from the
+        flux-magnitude dependence that dominates.
+    relative_median, relative_p90
+        Median and 90th percentile of ``RANDUNC / |NEE|``.
+    """
+
+    on_abs_nee: LinearFit
+    on_inv_sqrt_n: LinearFit
+    log_log_slope: float
+    partial_r_given_abs_nee: float
+    relative_median: float
+    relative_p90: float
+
+
+def randunc_relationships(frame: pd.DataFrame) -> RanduncFits:
+    """Fit the descriptive relationships behind the RANDUNC panels.
+
+    Uses every day with a usable NEE and a usable sigma. Days with ``QC == 0``
+    contribute no half-hours, so ``1/sqrt(n)`` is undefined there and they are
+    excluded from that fit alone.
+    """
+    nee = frame["NEE_VUT_REF"].to_numpy(dtype=float)
+    unc = frame["NEE_VUT_REF_RANDUNC"].to_numpy(dtype=float)
+    qc = frame["NEE_VUT_REF_QC"].to_numpy(dtype=float)
+
+    with np.errstate(invalid="ignore"):
+        usable = np.isfinite(nee) & np.isfinite(unc) & (unc > 0.0)
+
+    abs_nee = np.abs(nee[usable])
+    sigma = unc[usable]
+
+    n_halfhours = qc[usable] * HALFHOURS_PER_DAY
+    measured = n_halfhours > 0
+    inv_sqrt_n = 1.0 / np.sqrt(n_halfhours[measured])
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        relative = sigma / abs_nee
+    relative = relative[np.isfinite(relative)]
+
+    from scipy import stats
+
+    # Robust to binning, unlike the panel: a standard error of a mean over n
+    # values has log-log slope -0.5 exactly.
+    log_log = float(
+        stats.linregress(np.log(n_halfhours[measured]), np.log(sigma[measured])).slope
+    )
+
+    # Residualise both against |NEE| before correlating, so that the strong
+    # flux-magnitude dependence cannot masquerade as an n dependence.
+    def _residual(values: np.ndarray) -> np.ndarray:
+        design = abs_nee[measured]
+        fit = np.polyfit(design, values, 1)
+        return values - np.polyval(fit, design)
+
+    partial = float(
+        stats.pearsonr(_residual(inv_sqrt_n), _residual(sigma[measured])).statistic
+    )
+
+    return RanduncFits(
+        on_abs_nee=_ols(abs_nee, sigma),
+        on_inv_sqrt_n=_ols(inv_sqrt_n, sigma[measured]),
+        log_log_slope=log_log,
+        partial_r_given_abs_nee=partial,
+        relative_median=float(np.median(relative)),
+        relative_p90=float(np.percentile(relative, 90)),
+    )
