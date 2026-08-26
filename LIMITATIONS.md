@@ -294,6 +294,65 @@ see this failure mode at all.
 
 ---
 
+## 12. 2014 has no random-uncertainty estimate, and it is a product defect
+
+*(measured)*
+
+**Scope of this claim.** It concerns **FI-Hyy in the FLUXNET2015 FULLSET product,
+release `1-4`** — the daily and half-hourly files in `data/raw/`. It is *not* a
+claim about ONEFlux in general, about other sites, or about other releases. We
+have checked one site in one release and nothing else.
+
+**What it is.** `NEE_VUT_REF_RANDUNC` is absent for all 365 days of 2014, so no
+day of 2014 can enter the Gaussian likelihood, which takes its per-day sigma from
+that column. 2014 is otherwise one of the cleanest years in the record: 365/365
+valid `NEE_VUT_REF`, QC median 1.000, 333 days at QC = 1.0, 356 days passing
+QC ≥ 0.75, and a physically ordinary range of −6.10 to 2.90 g C m⁻² d⁻¹.
+
+**It is not a data-quality problem.** Three independent lines of evidence:
+
+1. **Fourteen independent uncertainty columns stop on the same day.** Every
+   flux `*_RANDUNC` column in the daily file — VUT and CUT, REF and USTAR50,
+   NIGHT and DAY, and `LE_RANDUNC` and `H_RANDUNC`, which are latent and sensible
+   heat rather than carbon — has its last valid value on **2013-10-14** (two on
+   10-13). Meanwhile `NEE_VUT_REF`, `GPP_NT_VUT_REF`, `RECO_NT_VUT_REF`,
+   `LE_F_MDS`, `H_F_MDS`, `TA_F` and `SW_IN_F` all run complete to 2014-12-31. A
+   simultaneous stop across physically unrelated variables, while the variables
+   they derive from continue, is a pipeline event and not a sensor one.
+
+2. **The pipeline records zero inputs, not missing inputs.**
+   `NIGHT_RANDUNC_N` and `DAY_RANDUNC_N` — the counts of records entering the
+   uncertainty estimate — are **present for all 365 days of 2014 and equal to
+   0.0** throughout. The stage ran and reported that nothing reached it.
+
+3. **The measurements it would have used are there, in normal quantity.** The
+   daily QC flag cannot settle this, because it counts "measured *or good-quality
+   gap-fill*". The half-hourly flag distinguishes them (`0` = measured), and by
+   that measure 2014 is unremarkable — **8385 measured half-hours, 47.9%**,
+   against **7135 (40.6%) in 2012** and 6362 (36.3%) in 2010, running through to
+   2014-12-31. 2014 carries *more* genuinely measured data than 2012, a year
+   whose RANDUNC is 99.7% complete.
+
+**The failure is upstream of daily aggregation.** In the FULLSET **half-hourly**
+file the uncertainty columns stop at the same point — `NEE_VUT_REF_RANDUNC` has
+its last valid value at **2013-10-14 18:00**, with `LE_RANDUNC` at 22:00 and
+`H_RANDUNC` at 23:30 the same day, and the `_N` and `_METHOD` companions ending
+on the identical half-hour — so half-hourly uncertainty estimation itself
+stopped, and the daily product is faithfully aggregating an input that is not
+there rather than losing it in the aggregation step.
+
+**Consequence for this thesis.** 2014 contributes **0 assimilable days**. It sits
+in the prediction block 2011–2014, which is 810 of 1461 days assimilable (55.4%);
+the forward run integrates 2014 normally, but none of it can be scored against
+observed NEE. The loss is a limitation of the published product for this site and
+release, not of the site or of the measurements.
+
+**Not investigated, deliberately.** Whether a later FLUXNET release or an ICOS
+reprocessing supplies the missing uncertainties is a question for supervision,
+not something to resolve by trying files.
+
+---
+
 ## Novelty claim — narrowed
 
 Do not claim gradients through DALEC are new. They are not:

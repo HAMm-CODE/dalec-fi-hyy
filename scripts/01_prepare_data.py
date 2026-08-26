@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """Raw FLUXNET csv -> processed, model-ready driver and observation arrays.
 
-Writes one NetCDF file per block (calibration and evaluation) into
+Writes one NetCDF file per block (calibration and prediction) into
 ``data/processed``. No rows are dropped: QC screening produces a boolean
 likelihood mask, not a filtered time series.
 
-Requires ``years.calibration`` (and, for the evaluation block,
-``years.evaluation``) to be set in the config. Fill them in from the output of
+Requires ``years.calibration`` (and, for the prediction block,
+``years.prediction``) to be set in the config. Fill them in from the output of
 ``scripts/00_qc_coverage.py``.
 
 Usage
@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH)
     parser.add_argument(
         "--block",
-        choices=["calibration", "evaluation", "both"],
+        choices=["calibration", "prediction", "both"],
         default="both",
         help="which year block(s) to prepare",
     )
@@ -110,7 +110,7 @@ def main() -> int:
     else:
         print("daily extremes: NOT USED -- falling back to the TA_F_DAY/TA_F_NIGHT proxy")
 
-    blocks = ["calibration", "evaluation"] if args.block == "both" else [args.block]
+    blocks = ["calibration", "prediction"] if args.block == "both" else [args.block]
     for block in blocks:
         start_year, end_year = require_year_block(config, block)
         site_data = build_site_data(

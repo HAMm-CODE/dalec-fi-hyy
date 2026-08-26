@@ -63,9 +63,9 @@ def resolve_path(value: str | Path) -> Path:
 def require_year_block(config: dict[str, Any], key: str) -> tuple[int, int]:
     """Return an inclusive ``(start_year, end_year)`` block from ``config['years']``.
 
-    Raises rather than defaulting: the calibration and evaluation blocks are a
+    Raises rather than defaulting: the calibration and prediction blocks are a
     decision that comes out of the Phase 1 coverage table, and silently guessing
-    them would invalidate the calibration/evaluation split.
+    them would invalidate the calibration/prediction split.
     """
     block = (config.get("years") or {}).get(key)
     if block is None:

@@ -41,14 +41,56 @@ The partitioned products are loaded, but only as a magnitude sanity check and
 for posterior consistency plots. They are model output, not observations, and
 never enter the likelihood.
 
-**Year blocks.** Calibration 1997–2005 (3287 days, 2781 assimilable, 84.6%);
-evaluation 2006–2009 (1461 days, 1390 assimilable, 95.1%). The blocks abut, so
-the forward run integrates from the start of calibration to the end of
-evaluation with no un-assimilated bridge year. The calibration block is nine
-years rather than the four of Richardson et al.; this was a deliberate choice.
-Excluded years and the reasons are recorded in `config/default.yaml`. Note 2014:
-356 QC-passing days at mean QC 0.974 and **zero** `RANDUNC` values, so not one
-day of it can enter the likelihood.
+**Year blocks — AUTHORITATIVE, decided 2026-08-26.**
+
+| block | years | inclusive |
+|---|---|---|
+| **calibration** | **1997–2010** | 14 years |
+| **prediction** | **2011–2014** | 4 years |
+
+This is the Richardson et al. (2010) split: a long calibration record followed by
+a forward run over a held-out contiguous block.
+
+| | total days | QC ≥ 0.75 | usable sigma | **assimilable** | driver gaps |
+|---|---:|---:|---:|---:|---:|
+| calibration 1997–2010 | 5113 | 4662 | 4748 | **4413 (86.3%)** | 0 |
+| prediction 2011–2014 | 1461 | 1418 | 844 | **810 (55.4%)** | 0 |
+
+"Assimilable" is the intersection — days that both pass QC and carry a usable
+sigma — and is the number that matters, since either condition alone is not
+enough to enter the likelihood. Every year of the record except 1996 is used;
+nothing is held in reserve.
+
+**Justification.** DALEC's slow pools — wood and soil organic matter — turn over
+on timescales of years to decades. A short record cannot identify them at all,
+because the observation window never sees enough of a turnover cycle for the
+data to distinguish one rate from another. Length is therefore not a convenience
+here; it is a precondition for the parameters being identifiable in principle.
+The split also follows published design rather than being chosen to suit this
+record, which matters because the alternative — picking the window that makes
+the results look best — is exactly the kind of choice a reviewer should not have
+to take on trust.
+
+This supersedes the earlier calibration 1997–2005 / evaluation 2006–2009 split
+and the reasoning recorded against it. `years.evaluation` is **retired**: the key
+is gone from the config, and `scripts/01_prepare_data.py` and
+`tests/test_config.py` now refer to `prediction`.
+
+**Why 1996 is excluded, and why that reason is not coverage.** `CO2_F_MDS` is
+missing for **1996-01-01 to 1996-01-19**, 19 consecutive days at the very start
+of the record. `data_io._check_drivers_complete` raises on any driver gap rather
+than interpolating, because one NaN driver silently contaminates every carbon
+pool from that day onward. **1997–2014 is entirely gap-free** — no driver, in any
+year, is missing on any day.
+
+The consequence is worth stating plainly, because it is the kind of claim a
+reviewer will want and it is rarely available: **the calibration block contains
+no imputed driver values.** Every driver on every one of its 5113 days is as the
+FLUXNET2015 product supplies it. Backfilling 19 days of CO2 to buy one more year
+would have forfeited that, for a year that is in any case only 50% assimilable.
+
+1996 is therefore excluded on driver completeness, not on the coverage grounds
+that drove the earlier and now-superseded year choices.
 
 ---
 

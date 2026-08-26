@@ -22,21 +22,37 @@ def test_default_config_loads() -> None:
 
 
 def test_default_config_year_blocks_are_contiguous_and_abut() -> None:
-    """The split came out of the Phase 1 coverage table, not out of a default.
+    """The design worth pinning: two contiguous inclusive ranges that abut.
 
-    Both blocks were left null until ``results/qc_coverage.csv`` existed; they
-    are now filled, so what is worth pinning is the *design*: two contiguous
-    inclusive year ranges that abut, so the forward run integrates straight from
-    the start of calibration to the end of evaluation with no un-assimilated
-    bridge year. The unset case is still guarded, at ``require_year_block``.
+    The forward run integrates straight from the start of calibration to the end
+    of prediction with no un-assimilated bridge year. The unset case is still
+    guarded, at ``require_year_block``.
+
+    ``years.evaluation`` was retired in favour of ``years.prediction`` when the
+    split moved to Richardson et al. (2010); see DECISIONS.md.
     """
     config = load_config()
     calibration = require_year_block(config, "calibration")
-    evaluation = require_year_block(config, "evaluation")
+    prediction = require_year_block(config, "prediction")
 
-    assert evaluation[0] == calibration[1] + 1, "the blocks must abut, leaving no gap"
+    assert prediction[0] == calibration[1] + 1, "the blocks must abut, leaving no gap"
     # The FLUXNET2015 record for this site.
-    assert 1996 <= calibration[0] and evaluation[1] <= 2014
+    assert 1996 <= calibration[0] and prediction[1] <= 2014
+
+
+def test_the_retired_evaluation_key_is_gone() -> None:
+    """Reintroducing it would silently produce a block overlapping calibration."""
+    assert "evaluation" not in load_config()["years"]
+
+
+def test_calibration_starts_in_1997_on_driver_completeness() -> None:
+    """1996 is excluded because CO2_F_MDS is missing 1996-01-01 to 1996-01-19.
+
+    Not a coverage judgement. 1997-2014 is entirely gap-free, so the calibration
+    block contains no imputed driver values -- a claim worth being able to make,
+    and one that moving the start year back would forfeit. See DECISIONS.md.
+    """
+    assert require_year_block(load_config(), "calibration")[0] == 1997
 
 
 def test_default_config_has_no_out_of_scope_knobs() -> None:

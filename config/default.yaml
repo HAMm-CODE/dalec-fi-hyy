@@ -67,30 +67,39 @@ data:
   # the forward model has to integrate continuously through them.
   qc_threshold: 0.75
 
-# --- Calibration / evaluation design -----------------------------------------
+# --- Calibration / prediction design ------------------------------------------
 # A contiguous calibration block followed by a forward run over a contiguous
-# held-out block (Richardson et al. 2010). Both are inclusive year ranges.
+# held-out block (Richardson et al. 2010). Both are inclusive year ranges, and
+# they abut, so the forward run integrates straight from the start of
+# calibration to the end of prediction with no un-assimilated bridge year.
 #
-# Chosen from the Phase 1 coverage table (results/qc_coverage.csv). Both blocks
-# are inclusive and contiguous, and they abut, so the forward run integrates
-# straight from the start of calibration to the end of evaluation with no
-# un-assimilated bridge year.
+#   calibration  1997-2010   5113 days, 4413 assimilable (86.3%)
+#   prediction   2011-2014   1461 days,  810 assimilable (55.4%)
 #
-#   calibration  1997-2005   3287 days, 2781 assimilable (84.6%)
-#   evaluation   2006-2009   1461 days, 1390 assimilable (95.1%)
+# Coverage is deliberately not the selection criterion -- see DECISIONS.md for
+# why record length is the binding requirement for the slow pools. 1996 is the
+# one year excluded, and on driver completeness rather than coverage. What the
+# remaining coverage costs, per window:
 #
-# Excluded, and why:
-#   1996  19 days with missing drivers -- the forward model cannot integrate
-#         through a gap, so the year is unusable outright.
-#   2010-2011  66% and 52% usable; 2011 loses 174 otherwise-good days to
-#         missing NEE_VUT_REF_RANDUNC.
-#   2012-2013  kept in reserve; usable but after a two-year break.
-#   2014  356 QC-passing days at mean QC 0.974, and *zero* RANDUNC values for
-#         the entire year. No uncertainty means no Gaussian sd, so not a single
-#         day of 2014 can enter the likelihood.
+#   2005  the 06-06..09-05 RANDUNC gap removes an entire growing season.
+#   2010-2011  a single RANDUNC gap, 2010-11-04..2011-06-23, straddles the split.
+#   2014  356 QC-passing days at mean QC 0.974, and *zero* RANDUNC values for the
+#         entire year -- so no day of 2014 can score against observed NEE.
 years:
-  calibration: [1997, 2005]
-  evaluation: [2006, 2009]
+  # AUTHORITATIVE, decided 2026-08-26. The Richardson et al. (2010) split: a long
+  # calibration record, then a forward run over a held-out contiguous block.
+  #
+  # The length is the point. DALEC's slow pools (wood, soil organic matter) turn
+  # over on timescales of years to decades, and a short record cannot identify
+  # them at all -- the window never sees enough of a turnover cycle for the data
+  # to tell one rate from another. Following a published design also keeps the
+  # window from being chosen to suit the record.
+  #
+  # 1996 is excluded on driver completeness, not on coverage: CO2_F_MDS is
+  # missing for 1996-01-01 to 1996-01-19. 1997-2014 is entirely gap-free, so the
+  # calibration block contains NO imputed driver values. See DECISIONS.md.
+  calibration: [1997, 2010]
+  prediction: [2011, 2014]
 
 # --- Fixed parameters --------------------------------------------------------
 # Parameters held at a constant value instead of being sampled. Populated in
