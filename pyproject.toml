@@ -41,6 +41,9 @@ dalec = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+markers = [
+    "pytensor: imports PyTensor in-process and JIT-compiles through Numba. Slow, and the only tests in the suite that need either library installed. Deselect for a fast loop: pytest -m 'not pytensor'.",
+]
 
 [tool.ruff]
 line-length = 100

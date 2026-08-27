@@ -2,6 +2,12 @@
 
 The point of these is that the guard *fires*. A check that cannot fail is worse
 than no check, because it reads like protection.
+
+Everything that imports PyTensor in-process carries ``@pytest.mark.pytensor``, so
+``pytest -m "not pytensor"`` gives a loop that touches neither PyTensor nor Numba.
+Two tests are deliberately left unmarked: the constants check, which is free, and
+``test_importing_dalec_does_not_import_pytensor``, which needs neither library
+and guards the very property that keeps the fast loop fast.
 """
 
 from __future__ import annotations
@@ -59,6 +65,7 @@ def test_importing_dalec_does_not_import_pytensor() -> None:
     assert result.stdout.strip() == "False False", result.stdout
 
 
+@pytest.mark.pytensor
 def test_first_compilation_pins_and_verifies_the_linker() -> None:
     """The guarantee is made where it is needed: when a graph is built."""
     import pytensor.tensor as pt
@@ -71,6 +78,7 @@ def test_first_compilation_pins_and_verifies_the_linker() -> None:
     assert resolved_linker_class() == EXPECTED_LINKER_CLASS
 
 
+@pytest.mark.pytensor
 def test_the_assertion_actually_fires_on_the_silent_fallback(restore_linker) -> None:
     """`cvm` is accepted and silently resolves to VMLinker with no compiler.
 
@@ -88,6 +96,7 @@ def test_the_assertion_actually_fires_on_the_silent_fallback(restore_linker) -> 
         assert_expected_linker()
 
 
+@pytest.mark.pytensor
 def test_the_error_names_what_it_resolved_to_and_what_it_costs(restore_linker) -> None:
     """An error that does not say what to do is a slower way to be confused."""
     import pytensor
@@ -102,12 +111,14 @@ def test_the_error_names_what_it_resolved_to_and_what_it_costs(restore_linker) -
     assert "130x" in message, "must say what the silent fallback costs"
 
 
+@pytest.mark.pytensor
 def test_configure_is_idempotent() -> None:
     assert configure_pytensor() == EXPECTED_LINKER_CLASS
     assert configure_pytensor() == EXPECTED_LINKER_CLASS
     assert ensure_configured() == EXPECTED_LINKER_CLASS
 
 
+@pytest.mark.pytensor
 def test_configure_restores_a_bad_pin_rather_than_leaving_it(restore_linker) -> None:
     """configure_pytensor() repairs; ensure_configured() is the once-only form.
 
