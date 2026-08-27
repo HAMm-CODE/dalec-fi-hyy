@@ -353,6 +353,59 @@ not something to resolve by trying files.
 
 ---
 
+## 13. 1996 winter NEE is gap-fill, and it reads as sustained midwinter uptake
+
+*(measured)*
+
+**Scope.** FI-Hyy in the FLUXNET2015 FULLSET daily product, release `1-4`, as for
+§12. Not a claim about other sites, other years, or ONEFlux in general.
+
+**What it is.** The first **163 consecutive days of 1996 — doy 1 to 163,
+1996-01-01 to 1996-06-11 — carry `NEE_VUT_REF_QC = 0.0`**: not one measured or
+good-quality gap-filled half-hour in nearly six months. `NEE_VUT_REF` is
+nevertheless populated for every one of those days, by gap-filling, and it is
+populated with a **repeating three-value cycle**: −5.38, −4.66 and −5.11
+g C m⁻² d⁻¹, each appearing exactly 31 times, covering 93 of the 163 days. Mean
+NEE across the QC = 0 block is **−4.26 g C m⁻² d⁻¹**.
+
+Read at face value that is five months of vigorous, unbroken net carbon uptake
+through a boreal midwinter, at a site whose January air temperature climatology
+sits near −8 °C. It is fill, not flux.
+
+**Why it matters beyond simply being wrong.** Unscreened, it moves a result. The
+spring-onset estimate in `eda02` — the first ten consecutive days of net uptake —
+is dragged to **doy 46** for 1996, against a median of doy 96 across the other
+eighteen years. Any analysis that reads `NEE_VUT_REF` without checking
+`NEE_VUT_REF_QC` will inherit this, and the failure is silent: the column is
+fully populated, finite, and of plausible magnitude.
+
+**1996 cannot date its own spring.** It has **zero** QC-passing days between
+doy 60 and 150 — 0 of 91 — and its first day at QC ≥ 0.75 is doy 165. So its
+apparent onset is not a late spring but the first moment real data resumes. It is
+excluded outright from the onset panel, and the exclusion is stated in the panel
+title rather than left to the reader.
+
+**This is independent of, and additional to, the CO₂ driver gap.** §1 of
+[DECISIONS.md](DECISIONS.md) excludes 1996 from the calibration block because
+`CO2_F_MDS` is missing for doy 1–19. That is a *driver* problem, it spans 19 days,
+and it would in principle be repairable by backfilling. This is an *observation*
+problem, it spans 163 days, and backfilling is exactly what caused it. Either one
+alone would justify excluding 1996; they are not the same finding and neither
+substitutes for the other.
+
+**Our position.** 1996 stays excluded from calibration, now on two independent
+grounds. More generally: **screen on `NEE_VUT_REF_QC` before using
+`NEE_VUT_REF` for anything**, including exploratory work, because the gap-filled
+values are neither missing nor obviously wrong. `dalec.data_io._likelihood_mask`
+already enforces this for the likelihood; the exposure is in ad-hoc analysis that
+reads the raw column directly.
+
+**Not investigated.** Whether the same pattern appears in other years, at other
+sites, or in other releases. §12's cutoff and this one are both artefacts of the
+same product and release, but nothing here establishes a common cause.
+
+---
+
 ## Novelty claim — narrowed
 
 Do not claim gradients through DALEC are new. They are not:

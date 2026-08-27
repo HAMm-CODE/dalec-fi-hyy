@@ -35,10 +35,12 @@ Spring onset — the first ten consecutive days of net uptake — has a median o
 target any phenology parameterisation has to reproduce, and a fixed onset day
 cannot.
 
-**Screening on QC matters here and is not cosmetic.** Unscreened, 1996 contributes
-a repeating three-value gap-fill cycle (−4.66, −5.38, −5.11 g C m⁻² d⁻¹) at
-QC = 0.0 through January and February, which reads as ten weeks of midwinter net
-uptake and drags the onset estimate to doy 46. It is fill, not flux. 1996 is
+**Screening on QC matters here and is not cosmetic.** Unscreened, 1996 drags the
+onset estimate to doy 46. Its first **163 days — doy 1 to 163** — are at
+QC = 0.0 throughout, filled with a repeating three-value cycle (−5.38, −4.66,
+−5.11 g C m⁻² d⁻¹, each appearing 31 times) averaging −4.26 g C m⁻² d⁻¹. That
+reads as five months of unbroken midwinter net uptake. It is fill, not flux; see
+[LIMITATIONS.md](../../LIMITATIONS.md) §13. 1996 is
 excluded from the onset panel outright: it has **zero** QC-passing days between
 doy 60 and 150, so its apparent doy-166 onset is a coverage gap rather than a
 late spring.
