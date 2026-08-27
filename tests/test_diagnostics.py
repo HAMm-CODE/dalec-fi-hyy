@@ -17,15 +17,19 @@ from dalec.diagnostics import (
     annual_gpp_comparison,
     binned_median_iqr,
     canopy_efficiency_sweep,
+    classify_prior_draw,
     format_gpp_magnitude_report,
     format_seasonal_timing_report,
     gpp_magnitude_gate,
+    prior_decade_mass,
     randunc_audit,
     randunc_relationships,
+    sample_prior_parameters,
     seasonal_timing,
     temperature_proxy_comparison,
 )
-from dalec.model_numpy import run_dalec2
+from dalec.model_numpy import DalecOutput, run_dalec2
+from dalec.parameters import PARAMETER_REGISTRY, prior_bounds
 
 #: Roughly calibrates the fake photosynthesis routine below so that its annual
 #: total lands near the synthetic partitioned products at mid-range ceff.
@@ -613,3 +617,145 @@ def test_binned_median_iqr_drops_empty_bins_and_orders_quartiles() -> None:
     assert (table["q25"] <= table["median"]).all()
     assert (table["median"] <= table["q75"]).all()
     assert list(table["n"]) == [2, 2]
+
+
+# ---------------------------------------------------------------------------
+# Task 1 -- prior sampling, decade mass, failed-draw classification
+# ---------------------------------------------------------------------------
+
+
+def test_scalar_prior_draws_come_from_the_registry_not_from_typed_bounds() -> None:
+    """The binding constraint of amendment A2.
+
+    Every scalar draw must sit inside the registry's own bounds. If a bound were
+    retyped anywhere, the guarantee that these are the priors that will later be
+    sampled is gone, and this is what would catch it.
+
+    The four simplex fractions are excluded deliberately -- see the test below.
+    """
+    _, frame = sample_prior_parameters(300, rng=np.random.default_rng(0))
+
+    for name, entry in PARAMETER_REGISTRY.items():
+        if entry.simplex:
+            continue
+        lower, upper = prior_bounds(name)
+        values = frame[name].to_numpy()
+        assert (values >= lower).all(), f"{name} below its registry lower bound"
+        assert (values <= upper).all(), f"{name} above its registry upper bound"
+
+
+def test_simplex_fractions_are_not_confined_to_their_tabulated_marginals() -> None:
+    """They are a Dirichlet split of 1 - f_auto, and that support is wider.
+
+    DECISIONS.md section 4: the Dirichlet support is a *superset* of the
+    published marginal ranges of 0.01-0.5, and an individual fraction may reach
+    1 - f_auto, up to 0.7. The registry keeps the tabulated bounds only because
+    Morris screening needs a range to perturb over, which is why those four
+    carry simplex=True so priors.py cannot build a Uniform from them.
+
+    Enforcing the marginals would need a truncated Dirichlet, reintroducing
+    exactly the rejection wall the reparameterisation exists to remove. So this
+    pins the deviation rather than treating it as a bug to be fixed later.
+    """
+    _, frame = sample_prior_parameters(600, rng=np.random.default_rng(5))
+    simplex = [name for name, p in PARAMETER_REGISTRY.items() if p.simplex]
+
+    below = sum(int((frame[name].to_numpy() < prior_bounds(name)[0]).any())
+                for name in simplex)
+    assert below > 0, (
+        "no simplex fraction fell below its tabulated marginal; the Dirichlet "
+        "support is supposed to be wider than the published range"
+    )
+    for name in simplex:
+        values = frame[name].to_numpy()
+        assert (values >= 0.0).all(), f"{name} went negative"
+        assert (values <= 0.7).all(), f"{name} exceeded 1 - min(f_auto)"
+
+
+def test_allocation_fractions_close_exactly_on_every_draw() -> None:
+    """f_auto + f_lab + f_fol + f_roo + f_woo = 1, the corrected five-term form."""
+    params, _ = sample_prior_parameters(200, rng=np.random.default_rng(1))
+    for parameters in params:
+        total = (
+            parameters.f_auto + parameters.f_lab + parameters.f_fol
+            + parameters.f_roo + parameters.f_woo
+        )
+        assert total == pytest.approx(1.0)
+
+
+def test_the_simplex_fractions_are_not_drawn_independently() -> None:
+    """Independent uniforms could not close; a Dirichlet split of 1 - f_auto does.
+
+    Also guards the registry's own claim: the four are flagged simplex=True
+    precisely so nothing builds a Uniform from their tabulated bounds.
+    """
+    _, frame = sample_prior_parameters(400, rng=np.random.default_rng(2))
+    simplex = [name for name, p in PARAMETER_REGISTRY.items() if p.simplex]
+    assert simplex == ["f_lab", "f_fol", "f_roo", "f_woo"]
+
+    allocated = frame[simplex].sum(axis=1).to_numpy()
+    assert allocated == pytest.approx(1.0 - frame["f_auto"].to_numpy())
+
+
+def test_prior_draws_are_reproducible_from_the_seed() -> None:
+    first, _ = sample_prior_parameters(20, rng=np.random.default_rng(20260809))
+    second, _ = sample_prior_parameters(20, rng=np.random.default_rng(20260809))
+    assert [p.to_dict() for p in first] == [p.to_dict() for p in second]
+
+
+def test_decade_mass_sums_to_one_per_parameter() -> None:
+    table = prior_decade_mass()
+    for name, group in table.groupby("parameter"):
+        assert group["mass_fraction"].sum() == pytest.approx(1.0), name
+
+
+def test_decade_mass_shows_the_uniform_prior_is_not_ignorance() -> None:
+    """theta_som on [1e-7, 1e-3] puts 90% of its mass in the top decade alone."""
+    table = prior_decade_mass()
+    som = table[table["parameter"] == "theta_som"].sort_values("decade_low")
+
+    assert len(som) == 4
+    assert som["mass_fraction"].iloc[-1] == pytest.approx(0.9, abs=0.01)
+    assert som["mass_fraction"].iloc[:2].sum() < 0.011, "bottom two decades are ~1%"
+
+
+def test_decade_mass_only_reports_wide_priors() -> None:
+    reported = set(prior_decade_mass()["parameter"])
+    # ceff spans exactly one order and must not appear.
+    assert "ceff" not in reported
+    # theta_lit spans exactly two, which is not *more* than two.
+    assert "theta_lit" not in reported
+    assert {"theta_som", "theta_min", "c_woo_0", "c_som_0"} <= reported
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda p, n: p.__setitem__((0, 0), np.nan), "non-finite"),
+        (lambda p, n: p.__setitem__((5, 2), -1.0), "negative pool"),
+        (lambda p, n: p.__setitem__((5, 3), p[0, 3] * 500.0), "pool growth"),
+        (lambda p, n: n.__setitem__(7, 45.0), "|NEE|"),
+    ],
+)
+def test_failed_draw_classifier_catches_each_criterion(mutate, expected) -> None:
+    """Hand-built trajectories, one defect each."""
+    pools = np.tile(np.array([100.0, 300.0, 200.0, 8000.0, 150.0, 10000.0]), (11, 1))
+    nee = np.full(10, 0.5)
+    mutate(pools, nee)
+    output = _output_from(pools, nee)
+
+    reason = classify_prior_draw(output)
+    assert reason is not None and expected in reason
+
+
+def test_failed_draw_classifier_passes_a_clean_trajectory() -> None:
+    pools = np.tile(np.array([100.0, 300.0, 200.0, 8000.0, 150.0, 10000.0]), (11, 1))
+    assert classify_prior_draw(_output_from(pools, np.full(10, 0.5))) is None
+
+
+def _output_from(pools: np.ndarray, nee: np.ndarray) -> DalecOutput:
+    zeros = np.zeros_like(nee)
+    return DalecOutput(
+        pools=pools, gpp=zeros, ra=zeros, rh=zeros, reco=zeros, nee=nee,
+        phi_onset=zeros, phi_fall=zeros,
+    )

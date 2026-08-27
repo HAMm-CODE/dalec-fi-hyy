@@ -65,6 +65,7 @@ enough to set a threshold on.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -81,10 +82,17 @@ from dalec.model_numpy import (
     gpp_not_implemented,
     run_dalec2,
 )
-from dalec.parameters import DalecParameters, prior_bounds
+from dalec.parameters import (
+    ALLOCATION_WEIGHT_ORDER,
+    PARAMETER_REGISTRY,
+    DalecParameters,
+    prior_bounds,
+)
 
 __all__ = [
     "DEFAULT_LAI_BAND",
+    "FAILURE_GROWTH_FACTOR",
+    "FAILURE_NEE_LIMIT",
     "HALFHOURS_PER_DAY",
     "GppMagnitudeGate",
     "LinearFit",
@@ -94,11 +102,14 @@ __all__ = [
     "binned_median_iqr",
     "calibration_bound_coverage",
     "canopy_efficiency_sweep",
+    "classify_prior_draw",
     "format_gpp_magnitude_report",
     "format_seasonal_timing_report",
     "gpp_magnitude_gate",
+    "prior_decade_mass",
     "randunc_audit",
     "randunc_relationships",
+    "sample_prior_parameters",
     "seasonal_timing",
     "shoulder_season_gpp",
     "temperature_proxy_comparison",
@@ -1164,3 +1175,153 @@ def randunc_relationships(frame: pd.DataFrame) -> RanduncFits:
         relative_median=float(np.median(relative)),
         relative_p90=float(np.percentile(relative, 90)),
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 1 -- prior predictive check
+#
+# Prior draws come straight from the Parameter registry with numpy. No PyMC
+# model is involved: the guarantee the spec wanted from
+# pm.sample_prior_predictive -- that the priors checked here are the priors that
+# will later be sampled -- is preserved by reading the same registry objects,
+# and is lost the moment a bound is retyped anywhere in this file.
+# ---------------------------------------------------------------------------
+
+#: A draw is unusable if any day exceeds this in magnitude, g C m-2 d-1.
+FAILURE_NEE_LIMIT: Final[float] = 30.0
+
+#: ...or if any pool grows by more than this factor over the run.
+FAILURE_GROWTH_FACTOR: Final[float] = 100.0
+
+
+def prior_decade_mass(min_orders: float = 2.0) -> pd.DataFrame:
+    """Fraction of each wide prior's mass falling in each decade of its range.
+
+    A uniform prior on ``[1e-7, 1e-3]`` is not an expression of ignorance about a
+    rate constant: it places 90% of its mass in the top decade and 99% above
+    ``1e-5``. That is a strong substantive claim, and it is invisible unless
+    someone computes it. Reported, never acted on -- the bounded-uniform priors
+    are a locked decision.
+
+    Parameters
+    ----------
+    min_orders
+        Report parameters whose range spans strictly more than this many orders
+        of magnitude.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per decade of each qualifying parameter: ``parameter``,
+        ``decade_low``, ``decade_high``, ``mass_fraction``, plus the parameter's
+        ``orders`` span.
+    """
+    rows = []
+    for name, entry in PARAMETER_REGISTRY.items():
+        if entry.lower <= 0.0:
+            continue
+        orders = math.log10(entry.upper / entry.lower)
+        if orders <= min_orders:
+            continue
+        width = entry.upper - entry.lower
+        start = math.floor(math.log10(entry.lower))
+        stop = math.ceil(math.log10(entry.upper))
+        for exponent in range(start, stop):
+            low = max(10.0**exponent, entry.lower)
+            high = min(10.0 ** (exponent + 1), entry.upper)
+            if high <= low:
+                continue
+            rows.append(
+                {
+                    "parameter": name,
+                    "orders": orders,
+                    "decade_low": low,
+                    "decade_high": high,
+                    "mass_fraction": (high - low) / width,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def sample_prior_parameters(
+    n_draws: int, *, rng: np.random.Generator
+) -> tuple[list[DalecParameters], pd.DataFrame]:
+    """Draw ``n_draws`` parameter sets from the registry's priors.
+
+    Bounded uniform for every scalar, read from :data:`PARAMETER_REGISTRY`; a
+    flat Dirichlet over the 4-simplex for the allocation fractions, which are
+    ``simplex=True`` in the registry precisely because they must not be drawn
+    independently. Initial pool states are drawn too -- fixing them at point
+    values would understate the prior spread and flatter the check.
+
+    Returns
+    -------
+    params
+        One :class:`DalecParameters` per draw.
+    frame
+        The draws as a table, including the derived allocation fractions, so
+        failed draws can be written out and inspected.
+    """
+    simplex_names = [n for n, p in PARAMETER_REGISTRY.items() if p.simplex]
+    if tuple(simplex_names) != tuple(ALLOCATION_WEIGHT_ORDER):
+        raise ValueError(
+            f"registry simplex order {simplex_names} does not match "
+            f"ALLOCATION_WEIGHT_ORDER {ALLOCATION_WEIGHT_ORDER}; that ordering is "
+            "load-bearing and no conservation test would catch a permutation"
+        )
+    scalar_names = [n for n, p in PARAMETER_REGISTRY.items() if not p.simplex]
+
+    draws = {
+        name: rng.uniform(*prior_bounds(name), size=n_draws) for name in scalar_names
+    }
+    weights = rng.dirichlet(np.ones(len(simplex_names)), size=n_draws)
+
+    params = []
+    for index in range(n_draws):
+        rest = {
+            name: float(draws[name][index])
+            for name in scalar_names
+            if name != "f_auto"
+        }
+        params.append(
+            DalecParameters.from_allocation_simplex(
+                f_auto=float(draws["f_auto"][index]),
+                allocation_weights=weights[index],
+                **rest,
+            )
+        )
+
+    frame = pd.DataFrame(
+        {
+            **{name: draws[name] for name in scalar_names},
+            **{
+                name: np.array([getattr(p, name) for p in params])
+                for name in simplex_names
+            },
+        }
+    )
+    frame.insert(0, "draw", np.arange(n_draws))
+    return params, frame
+
+
+def classify_prior_draw(output: DalecOutput) -> str | None:
+    """Why this draw is unusable, or ``None`` if it is fine.
+
+    The four criteria of the specification, in order of severity. Draws are
+    classified, not silently dropped: the failure rate is a result in its own
+    right, being the pathology Ecological Dynamical Constraints exist to
+    eliminate, and therefore the measurable cost of choosing not to use them.
+    """
+    pools, nee = output.pools, output.nee
+    if not (np.isfinite(nee).all() and np.isfinite(pools).all()):
+        return "non-finite"
+    if (pools < 0.0).any():
+        return "negative pool"
+    initial = pools[0]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        growth = np.where(initial > 0.0, pools.max(axis=0) / initial, np.inf)
+    if (growth > FAILURE_GROWTH_FACTOR).any():
+        return f"pool growth >{FAILURE_GROWTH_FACTOR:g}x"
+    if np.abs(nee).max() > FAILURE_NEE_LIMIT:
+        return f"|NEE| >{FAILURE_NEE_LIMIT:g}"
+    return None
