@@ -11,7 +11,7 @@ compiler is present: measured on this machine, ``linker="cvm"`` returns a plain
 231 ms against Numba's 1.7 ms. A 130x slowdown, reported as success.
 
 That is the failure this module is here to make loud. The backend is pinned by
-name, and the resolved linker is read back and asserted at import.
+name, and the resolved linker is read back and asserted.
 
 What is pinned, and why Numba
 -----------------------------
@@ -25,26 +25,37 @@ Pinning rather than leaving ``auto`` also means that adding a compiler to a
 machine later cannot silently move the project onto a different backend and
 change its numbers.
 
-Cost of the check
------------------
-Importing this module imports PyTensor, roughly 1.5 s, and the assertion itself
-compiles nothing -- it reads the resolved default mode. Note the coupling this
-creates: ``import dalec`` now requires PyTensor and Numba even for the pure-NumPy
-forward model. That is deliberate. Discovering that a machine has no Numba at
-import is far cheaper than discovering it from a sampling run that is 130x slower
-than budgeted.
+The check is lazy, and that is deliberate
+-----------------------------------------
+Nothing here imports PyTensor at module import. The pin and the assertion run on
+**first graph compilation**, through :func:`compile_function`, which is the
+sanctioned way for this project to build a PyTensor function.
+
+The alternative -- asserting at ``import dalec`` -- was tried and reverted. It
+made PyTensor and Numba hard dependencies of the pure-NumPy forward model, the
+data loader and the diagnostics, none of which touch PyTensor, and it added
+roughly 25 s to the test suite for a guarantee none of those code paths need.
+Deferring costs nothing in safety: the guarantee is needed exactly when a graph
+is compiled, and that is exactly when it is now made.
+
+Anything compiling a PyTensor function must go through :func:`compile_function`
+rather than calling ``pytensor.function`` directly. That is the one rule this
+module asks for, and it is what makes "first compilation" a place that exists.
 """
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 __all__ = [
     "EXPECTED_LINKER_CLASS",
     "PYTENSOR_LINKER",
     "LinkerConfigurationError",
     "assert_expected_linker",
+    "compile_function",
     "configure_pytensor",
+    "ensure_configured",
+    "is_configured",
     "resolved_linker_class",
 ]
 
@@ -57,6 +68,11 @@ PYTENSOR_LINKER: Final[str] = "numba"
 #: is present.
 EXPECTED_LINKER_CLASS: Final[str] = "NumbaLinker"
 
+#: Set once :func:`ensure_configured` has run. Not a cache of the answer -- the
+#: answer is re-derivable at any time by :func:`resolved_linker_class` -- only a
+#: record that the one-time pin has been applied.
+_configured: bool = False
+
 
 class LinkerConfigurationError(RuntimeError):
     """Raised when PyTensor did not resolve to the pinned backend."""
@@ -67,7 +83,8 @@ def resolved_linker_class() -> str:
 
     Reads the resolved default mode rather than ``config.linker``, because the
     requested value and the resolved one differ precisely in the case worth
-    catching. Compiles nothing.
+    catching. Compiles nothing. Imports PyTensor, so this is not free on the
+    first call.
     """
     import pytensor
 
@@ -112,8 +129,8 @@ def assert_expected_linker() -> str:
 def configure_pytensor(linker: str = PYTENSOR_LINKER) -> str:
     """Pin the linker and confirm PyTensor honoured it.
 
-    Called once on import of this module. Safe to call again; setting the same
-    value twice is a no-op.
+    Unconditional: use this to repair a linker something else has changed.
+    :func:`ensure_configured` is the once-per-process form.
 
     Parameters
     ----------
@@ -125,11 +142,41 @@ def configure_pytensor(linker: str = PYTENSOR_LINKER) -> str:
     -------
     The resolved linker class name.
     """
+    global _configured
+
     import pytensor
 
     pytensor.config.linker = linker
-    return assert_expected_linker()
+    resolved = assert_expected_linker()
+    _configured = True
+    return resolved
 
 
-# Startup check. Import of this module is what makes the guarantee.
-RESOLVED_LINKER: Final[str] = configure_pytensor()
+def is_configured() -> bool:
+    """Whether the one-time pin has been applied in this process."""
+    return _configured
+
+
+def ensure_configured() -> str:
+    """Pin and assert once per process; cheap on every call after the first.
+
+    Called by :func:`compile_function` before any graph is built, which is what
+    makes the check happen on first compilation rather than at import.
+    """
+    if _configured:
+        return EXPECTED_LINKER_CLASS
+    return configure_pytensor()
+
+
+def compile_function(*args: Any, **kwargs: Any) -> Any:
+    """``pytensor.function``, with the backend pinned and verified first.
+
+    The sanctioned way to compile a PyTensor function in this project. Takes and
+    returns exactly what ``pytensor.function`` does; the only difference is that
+    the linker is guaranteed, and loudly so, before the graph is built.
+    """
+    ensure_configured()
+
+    import pytensor
+
+    return pytensor.function(*args, **kwargs)

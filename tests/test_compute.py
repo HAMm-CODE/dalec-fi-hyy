@@ -1,10 +1,14 @@
-"""Tests for the pinned PyTensor backend and its startup assertion.
+"""Tests for the pinned PyTensor backend and its first-compilation assertion.
 
 The point of these is that the guard *fires*. A check that cannot fail is worse
 than no check, because it reads like protection.
 """
 
 from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -14,9 +18,23 @@ from dalec.compute import (
     PYTENSOR_LINKER,
     LinkerConfigurationError,
     assert_expected_linker,
+    compile_function,
     configure_pytensor,
+    ensure_configured,
     resolved_linker_class,
 )
+
+_SRC = str(Path(__file__).resolve().parents[1] / "src")
+
+
+@pytest.fixture
+def restore_linker():
+    """Put the linker back however the test leaves it."""
+    import pytensor
+
+    original = pytensor.config.linker
+    yield
+    pytensor.config.linker = original
 
 
 def test_the_linker_is_pinned_by_name_not_left_on_auto() -> None:
@@ -25,48 +43,58 @@ def test_the_linker_is_pinned_by_name_not_left_on_auto() -> None:
     assert PYTENSOR_LINKER != "auto"
 
 
-def test_importing_dalec_leaves_pytensor_on_numba() -> None:
-    import pytensor
+def test_importing_dalec_does_not_import_pytensor() -> None:
+    """The NumPy paths must not depend on PyTensor or Numba being installed.
 
-    assert pytensor.config.linker == PYTENSOR_LINKER
-    assert dalec.RESOLVED_LINKER == EXPECTED_LINKER_CLASS
+    Checked in a fresh interpreter, since this one has already imported both.
+    """
+    result = subprocess.run(
+        [
+            sys.executable, "-c",
+            f"import sys; sys.path.insert(0, r'{_SRC}'); import dalec; "
+            "print('pytensor' in sys.modules, 'numba' in sys.modules)",
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout.strip() == "False False", result.stdout
+
+
+def test_first_compilation_pins_and_verifies_the_linker() -> None:
+    """The guarantee is made where it is needed: when a graph is built."""
+    import pytensor.tensor as pt
+
+    x = pt.dvector("x")
+    fn = compile_function([x], x.sum())
+
+    assert type(fn.maker.mode.linker).__name__ == EXPECTED_LINKER_CLASS
+    assert dalec.compute.is_configured()
     assert resolved_linker_class() == EXPECTED_LINKER_CLASS
 
 
-def test_the_assertion_actually_fires_on_the_silent_fallback() -> None:
+def test_the_assertion_actually_fires_on_the_silent_fallback(restore_linker) -> None:
     """`cvm` is accepted and silently resolves to VMLinker with no compiler.
 
     This is the exact case the guard exists for, so it is exercised directly
-    rather than trusted. The linker is restored afterwards whatever happens.
+    rather than trusted.
     """
     import pytensor
 
-    original = pytensor.config.linker
-    try:
-        pytensor.config.linker = "cvm"
-        assert resolved_linker_class() != EXPECTED_LINKER_CLASS, (
-            "expected cvm to degrade silently; if it no longer does, this "
-            "environment has gained a C compiler and the guard needs rethinking"
-        )
-        with pytest.raises(LinkerConfigurationError, match="not 'NumbaLinker'"):
-            assert_expected_linker()
-    finally:
-        pytensor.config.linker = original
-
-    assert resolved_linker_class() == EXPECTED_LINKER_CLASS, "linker not restored"
+    pytensor.config.linker = "cvm"
+    assert resolved_linker_class() != EXPECTED_LINKER_CLASS, (
+        "expected cvm to degrade silently; if it no longer does, this "
+        "environment has gained a C compiler and the guard needs rethinking"
+    )
+    with pytest.raises(LinkerConfigurationError, match="not 'NumbaLinker'"):
+        assert_expected_linker()
 
 
-def test_the_error_names_what_it_resolved_to_and_what_it_costs() -> None:
+def test_the_error_names_what_it_resolved_to_and_what_it_costs(restore_linker) -> None:
     """An error that does not say what to do is a slower way to be confused."""
     import pytensor
 
-    original = pytensor.config.linker
-    try:
-        pytensor.config.linker = "py"
-        with pytest.raises(LinkerConfigurationError) as excinfo:
-            assert_expected_linker()
-    finally:
-        pytensor.config.linker = original
+    pytensor.config.linker = "py"
+    with pytest.raises(LinkerConfigurationError) as excinfo:
+        assert_expected_linker()
 
     message = str(excinfo.value)
     assert "PerformLinker" in message, "must name what it actually resolved to"
@@ -77,12 +105,26 @@ def test_the_error_names_what_it_resolved_to_and_what_it_costs() -> None:
 def test_configure_is_idempotent() -> None:
     assert configure_pytensor() == EXPECTED_LINKER_CLASS
     assert configure_pytensor() == EXPECTED_LINKER_CLASS
+    assert ensure_configured() == EXPECTED_LINKER_CLASS
 
 
-def test_configure_restores_a_bad_pin_rather_than_leaving_it() -> None:
-    """Calling configure_pytensor() repairs a linker someone else changed."""
+def test_configure_restores_a_bad_pin_rather_than_leaving_it(restore_linker) -> None:
+    """configure_pytensor() repairs; ensure_configured() is the once-only form.
+
+    The distinction matters: after the first compilation ``ensure_configured``
+    short-circuits, so it will not notice a linker something else has changed.
+    Repairing is what ``configure_pytensor`` is for.
+    """
     import pytensor
 
+    ensure_configured()
     pytensor.config.linker = "vm"
     assert resolved_linker_class() == "VMLinker"
+
+    assert ensure_configured() == EXPECTED_LINKER_CLASS
+    assert resolved_linker_class() == "VMLinker", (
+        "ensure_configured short-circuits once configured -- it is not a repair"
+    )
+
     assert configure_pytensor() == EXPECTED_LINKER_CLASS
+    assert resolved_linker_class() == EXPECTED_LINKER_CLASS
