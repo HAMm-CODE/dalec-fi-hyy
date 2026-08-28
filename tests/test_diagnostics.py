@@ -14,18 +14,22 @@ from dalec.data_io import MISSING_VALUE, SiteData, build_site_data, load_fluxnet
 from dalec.diagnostics import (
     HALFHOURS_PER_DAY,
     SUGGESTED_PEAK_OFFSET_DAYS,
+    SWEEP_POINTS,
     annual_gpp_comparison,
     binned_median_iqr,
     canopy_efficiency_sweep,
     classify_prior_draw,
     format_gpp_magnitude_report,
     format_seasonal_timing_report,
+    gaussian_loglik,
     gpp_magnitude_gate,
     prior_decade_mass,
+    prior_sweep_values,
     randunc_audit,
     randunc_relationships,
     sample_prior_parameters,
     seasonal_timing,
+    simplex_edge_weights,
     temperature_proxy_comparison,
 )
 from dalec.model_numpy import DalecOutput, run_dalec2
@@ -759,3 +763,109 @@ def _output_from(pools: np.ndarray, nee: np.ndarray) -> DalecOutput:
         pools=pools, gpp=zeros, ra=zeros, rh=zeros, reco=zeros, nee=nee,
         phi_onset=zeros, phi_fall=zeros,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 2 -- sweep design and the likelihood
+# ---------------------------------------------------------------------------
+
+
+def test_sweep_endpoints_lie_inside_the_prior_support() -> None:
+    """1st to 99th percentile, so no sweep point sits on a bound."""
+    for name, entry in PARAMETER_REGISTRY.items():
+        if entry.simplex:
+            continue
+        values = prior_sweep_values(name)
+        assert len(values) == SWEEP_POINTS
+        assert values[0] > entry.lower, f"{name} starts on its lower bound"
+        assert values[-1] < entry.upper, f"{name} ends on its upper bound"
+        assert (values >= entry.lower).all() and (values <= entry.upper).all()
+
+
+def test_sweep_is_linear_because_the_priors_are_uniform() -> None:
+    """Amendment A1: linear spacing, not geometric.
+
+    The original specification called for geometric spacing on the grounds that
+    the priors were log-uniform. They are not, and a geometric centre would put
+    theta_som two orders of magnitude off.
+    """
+    values = prior_sweep_values("theta_som")
+    steps = np.diff(values)
+    assert np.allclose(steps, steps[0]), "spacing is not linear"
+
+    lower, upper = prior_bounds("theta_som")
+    geometric_centre = np.sqrt(lower * upper)
+    linear_centre = values[len(values) // 2]
+    assert linear_centre / geometric_centre > 10.0, (
+        "the two conventions should differ by orders here, which is the point"
+    )
+
+
+def test_simplex_edge_rows_stay_on_the_simplex() -> None:
+    anchor = np.array([0.30, 0.29, 0.28, 0.13])
+    for target in range(4):
+        rows = simplex_edge_weights(anchor, target)
+        assert rows.shape == (SWEEP_POINTS, 4)
+        assert np.allclose(rows.sum(axis=1), 1.0), "rows must remain a simplex"
+        assert (rows >= 0.0).all()
+        assert rows[0, target] < rows[-1, target], "target must increase"
+
+
+def test_simplex_edge_holds_the_other_fractions_in_proportion() -> None:
+    """Raising one fraction lowers the others proportionally, not arbitrarily."""
+    anchor = np.array([0.40, 0.30, 0.20, 0.10])
+    rows = simplex_edge_weights(anchor, 0)
+    others = rows[:, 1:]
+    first = others[0] / others[0].sum()
+    last = others[-1] / others[-1].sum()
+    assert np.allclose(first, last), "the remainder changed its internal shares"
+    assert np.allclose(first, anchor[1:] / anchor[1:].sum())
+
+
+def test_loglik_is_computed_only_on_assimilable_days(block: SiteData) -> None:
+    """Masked days must contribute nothing, however wrong the prediction is."""
+    _, _, mask = block.likelihood_arrays()
+    predicted = np.where(mask, block.nee_obs, 0.0)
+    baseline = gaussian_loglik(predicted, block)
+
+    wrecked = predicted.copy()
+    wrecked[~mask] = 1e6
+    assert gaussian_loglik(wrecked, block) == pytest.approx(baseline)
+
+
+def test_loglik_is_maximised_by_predicting_the_observations(block: SiteData) -> None:
+    _, _, mask = block.likelihood_arrays()
+    perfect = np.where(mask, block.nee_obs, 0.0)
+    worse = perfect + np.where(mask, 0.5, 0.0)
+    assert gaussian_loglik(perfect, block) > gaussian_loglik(worse, block)
+
+
+def test_loglik_weights_days_by_their_own_sigma(block: SiteData) -> None:
+    """The headline metric exists because a big NEE move can be invisible.
+
+    Displacing a low-sigma day costs far more likelihood than displacing a
+    high-sigma one by the same amount, which is exactly why d_loglik is the
+    ranking statistic rather than delta-NEE.
+    """
+    # The synthetic fixture's RANDUNC spans only 0.30-0.40, too narrow to make
+    # the point, so the spread is constructed here rather than borrowed.
+    wide = block.nee_unc.copy()
+    wide[::2] = 0.05
+    wide[1::2] = 1.00
+    block = replace(block, nee_unc=wide)
+
+    observations, sigma, mask = block.likelihood_arrays()
+    indices = np.flatnonzero(mask)
+    order = np.argsort(sigma[indices])
+    tightest, loosest = indices[order[0]], indices[order[-1]]
+    assert sigma[loosest] > sigma[tightest] * 2, "need a real spread to test"
+
+    base = np.where(mask, observations, 0.0)
+    shift_tight = base.copy()
+    shift_tight[tightest] += 1.0
+    shift_loose = base.copy()
+    shift_loose[loosest] += 1.0
+
+    cost_tight = gaussian_loglik(base, block) - gaussian_loglik(shift_tight, block)
+    cost_loose = gaussian_loglik(base, block) - gaussian_loglik(shift_loose, block)
+    assert cost_tight > cost_loose

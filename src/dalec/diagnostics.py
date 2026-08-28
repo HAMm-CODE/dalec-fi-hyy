@@ -94,6 +94,8 @@ __all__ = [
     "FAILURE_GROWTH_FACTOR",
     "FAILURE_NEE_LIMIT",
     "HALFHOURS_PER_DAY",
+    "SWEEP_PERCENTILES",
+    "SWEEP_POINTS",
     "GppMagnitudeGate",
     "LinearFit",
     "RanduncAudit",
@@ -105,13 +107,16 @@ __all__ = [
     "classify_prior_draw",
     "format_gpp_magnitude_report",
     "format_seasonal_timing_report",
+    "gaussian_loglik",
     "gpp_magnitude_gate",
     "prior_decade_mass",
+    "prior_sweep_values",
     "randunc_audit",
     "randunc_relationships",
     "sample_prior_parameters",
     "seasonal_timing",
     "shoulder_season_gpp",
+    "simplex_edge_weights",
     "temperature_proxy_comparison",
 ]
 
@@ -1325,3 +1330,101 @@ def classify_prior_draw(output: DalecOutput) -> str | None:
     if np.abs(nee).max() > FAILURE_NEE_LIMIT:
         return f"|NEE| >{FAILURE_NEE_LIMIT:g}"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Task 2 -- one-at-a-time sensitivity
+#
+# The sweep anchor is NOT the prior median. At the prior median the soil and
+# litter terms together imply 55 g C m-2 d-1 of heterotrophic respiration, an
+# order of magnitude above anything this site does, and 84% of prior draws fail
+# outright (Task 1). Sweeping around a point the posterior will never visit
+# measures sensitivity in a region that does not matter. The anchor used is the
+# component-wise median of the draws that survived Task 1's screening, where the
+# same terms give 8.9 g C m-2 d-1.
+# ---------------------------------------------------------------------------
+
+#: Sweep endpoints, as prior percentiles. The extremes themselves are avoided
+#: because a uniform prior's endpoint is a measure-zero point the sampler will
+#: not sit on, and because some of them fail outright.
+SWEEP_PERCENTILES: Final[tuple[float, float]] = (1.0, 99.0)
+
+#: Points per sweep, per the specification.
+SWEEP_POINTS: Final[int] = 15
+
+
+def gaussian_loglik(predicted: np.ndarray, site_data: SiteData) -> float:
+    """Gaussian log-likelihood of ``predicted`` NEE, on assimilable days only.
+
+    Uses ``NEE_VUT_REF_RANDUNC`` as the per-day standard deviation, exactly as
+    the sampler will. Days failing QC, or lacking a usable sigma, contribute
+    nothing -- masking is a likelihood operation, and the forward model has still
+    integrated through them.
+
+    This is the quantity the headline metric is built from: a parameter can move
+    NEE substantially and still be invisible, if it moves it on days where sigma
+    is large. Only the likelihood reflects what the sampler actually feels.
+    """
+    observations, sigma, mask = site_data.likelihood_arrays()
+    if not mask.any():
+        return float("nan")
+    residual = (observations[mask] - predicted[mask]) / sigma[mask]
+    return float(
+        -0.5 * np.sum(residual**2)
+        - np.sum(np.log(sigma[mask]))
+        - 0.5 * int(mask.sum()) * math.log(2.0 * math.pi)
+    )
+
+
+def prior_sweep_values(
+    name: str,
+    n_points: int = SWEEP_POINTS,
+    percentiles: tuple[float, float] = SWEEP_PERCENTILES,
+) -> np.ndarray:
+    """Sweep points for one parameter, spaced on its prior's natural scale.
+
+    The priors are bounded **uniform** (amendment A1), so the natural scale is
+    linear and the percentiles are a straight interpolation of the bounds. This
+    is the point the original specification got wrong for this repo: a geometric
+    mean would put ``theta_som``'s centre two orders of magnitude off.
+    """
+    lower, upper = prior_bounds(name)
+    width = upper - lower
+    return np.linspace(
+        lower + 0.01 * percentiles[0] * width,
+        lower + 0.01 * percentiles[1] * width,
+        n_points,
+    )
+
+
+def simplex_edge_weights(
+    anchor_weights: np.ndarray,
+    target: int,
+    n_points: int = SWEEP_POINTS,
+    percentiles: tuple[float, float] = SWEEP_PERCENTILES,
+) -> np.ndarray:
+    """Sweep one allocation fraction along its simplex edge.
+
+    The four allocation fractions are a Dirichlet split of ``1 - f_auto`` and
+    cannot move independently: raising one lowers the others. So the target runs
+    from near-0 to near-1 while the remainder keeps its anchor proportions,
+    rescaled to what is left. Treating these as independent uniforms would be a
+    different model, not a different sweep.
+
+    Returns
+    -------
+    numpy.ndarray
+        ``(n_points, 4)``, each row summing to one.
+    """
+    anchor = np.asarray(anchor_weights, dtype=float)
+    anchor = anchor / anchor.sum()
+    others = np.setdiff1d(np.arange(anchor.size), [target])
+    share = anchor[others] / anchor[others].sum()
+
+    rows = np.empty((n_points, anchor.size))
+    for row, fraction in enumerate(
+        np.linspace(0.01 * percentiles[0], 0.01 * percentiles[1], n_points)
+    ):
+        rows[row, target] = fraction
+        rows[row, others] = share * (1.0 - fraction)
+    return rows
