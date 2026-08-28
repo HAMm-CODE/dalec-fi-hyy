@@ -49,8 +49,10 @@ from dalec.diagnostics import (  # noqa: E402
 from dalec.model_numpy import dalec2_phenology, run_dalec2  # noqa: E402
 from dalec.parameters import (  # noqa: E402
     ANNUAL_LITTER_INPUT_G_C_M2,
+    ANNUAL_RH_G_C_M2,
     DAYS_PER_YEAR,
     LITTER_RESIDENCE_TIME_YEARS,
+    SOIL_CARBON_STOCK_G_C_M2,
     SOM_RESIDENCE_TIME_YEARS,
     decomposition_multiplier,
 )
@@ -63,12 +65,13 @@ COVERAGE_INTERVAL = (5.0, 95.0)
 TASK1_FAILURE_RATE = 0.837
 TASK1_COVERAGE = 0.651
 
-#: Published soil carbon inventory range for the site, g C m-2.
+#: Published soil carbon inventory range for the site, g C m-2. Retained as the
+#: comparison Check 1 was originally stated against.
 SOIL_INVENTORY_RANGE = (5000.0, 10000.0)
 
 #: Large enough that the derived-stock quantiles are not sampling noise; these
 #: are closed-form draws, no forward model involved.
-ANALYTIC_DRAWS = 200_000
+ANALYTIC_DRAWS = 60_000
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,15 +145,19 @@ def main() -> int:
     print("\n" + bar)
     print("  Construction of the rh_ref prior")
     print(bar)
-    print(f"  annual litter input      {ANNUAL_LITTER_INPUT_G_C_M2[1]:.0f} "
-          f"g C m-2 yr-1  (range {ANNUAL_LITTER_INPUT_G_C_M2[0]:.0f}-"
-          f"{ANNUAL_LITTER_INPUT_G_C_M2[2]:.0f})")
+    print(f"  annual Rh (Fig. 6)       {ANNUAL_RH_G_C_M2[0]:.0f}-"
+          f"{ANNUAL_RH_G_C_M2[1]:.0f} g C m-2 yr-1   <- the prior basis")
+    print(f"  annual litter input      {ANNUAL_LITTER_INPUT_G_C_M2[0]:.0f}-"
+          f"{ANNUAL_LITTER_INPUT_G_C_M2[2]:.0f}   <- corroboration only, "
+          "steady-state upper bound")
+    print(f"  soil carbon stock        {SOIL_CARBON_STOCK_G_C_M2:.0f} g C m-2 "
+          "(Fig. 6, measured)")
     print(f"  mean TA_F                {t_air.mean():.3f} degC "
           f"(sd {t_air.std():.3f})")
     print(f"  M = mean(exp(0.0366 T))  {multiplier:.4f}   <- from the drivers")
     print(f"  exp(0.0366 mean T)       {naive:.4f}   <- NOT used, "
           f"{100 * (naive / multiplier - 1):+.1f}% (Jensen)")
-    print(f"  rh_ref = input / (M * {DAYS_PER_YEAR:g})")
+    print("  rh_ref = rh_annual / (M(Theta_draw) * 365.25), M computed PER DRAW")
     print(f"  residence times          litter "
           f"{LITTER_RESIDENCE_TIME_YEARS[0]:g}-{LITTER_RESIDENCE_TIME_YEARS[1]:g} yr, "
           f"SOM {SOM_RESIDENCE_TIME_YEARS[0]:g}-{SOM_RESIDENCE_TIME_YEARS[1]:g} yr")
@@ -175,6 +182,11 @@ def main() -> int:
         print(f"  {name}   min {v.min():8,.0f}   2.5% {q[0]:8,.0f}   "
               f"median {q[2]:8,.0f}   97.5% {q[4]:8,.0f}   max {v.max():8,.0f}")
         print(f"  {'':8}  IQR {q[1]:,.0f} to {q[3]:,.0f}")
+    total = (analytic["c_lit_0"] + analytic["c_som_0"]).to_numpy()
+    q_tot = np.percentile(total, [25, 50, 75])
+    print(f"  total soil C  median {q_tot[1]:,.0f}   IQR {q_tot[0]:,.0f} to "
+          f"{q_tot[2]:,.0f}   against the measured "
+          f"{SOIL_CARBON_STOCK_G_C_M2:,.0f}")
     som = analytic["c_som_0"].to_numpy()
     inside = float(((som >= lo_t) & (som <= hi_t)).mean())
     print(f"\n  prior mass inside the inventory range   {100 * inside:.1f}%")

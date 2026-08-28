@@ -38,13 +38,18 @@ from dalec.diagnostics import (
 )
 from dalec.model_numpy import DalecOutput, run_dalec2
 from dalec.parameters import (
-    ANNUAL_LITTER_INPUT_G_C_M2,
+    ANNUAL_RH_G_C_M2,
     DAYS_PER_YEAR,
+    F_SOM_BOUNDS,
+    LITTER_RESIDENCE_TIME_YEARS,
     PARAMETER_REGISTRY,
+    SOIL_CARBON_STOCK_G_C_M2,
+    SOM_RESIDENCE_TIME_YEARS,
     decomposition_multiplier,
     derive_litter_som_pools,
     prior_bounds,
-    reference_respiration_bounds,
+    reference_respiration_rate,
+    som_residence_time_from_stock,
     turnover_bounds_from_residence_time,
 )
 
@@ -948,27 +953,80 @@ class TestResidenceTimeBounds:
                 turnover_bounds_from_residence_time(bad)
 
 
-class TestReferenceRespirationBounds:
-    def test_the_bounds_invert_the_steady_state_mass_balance(self):
-        """rh_ref * M * 365.25 must return the annual litter input.
+class TestReferenceRespirationRate:
+    def test_each_draw_respires_its_own_annual_total_at_its_own_theta(self):
+        """The correction: the multiplier is per draw, not fixed.
 
-        This is the identity the whole prior rests on, so it is asserted
-        directly rather than through the numbers it happens to produce.
+        Holding Theta at one value while temperature_exponent is itself sampled
+        drifted the realised annual total off target -- measured at 299.8
+        against an intended 280. Computing M per draw removes the drift, so this
+        asserts the inversion exactly rather than approximately.
         """
         t_air = np.linspace(-15.0, 20.0, 400)
-        low_in, _central, high_in = ANNUAL_LITTER_INPUT_G_C_M2
-        multiplier = decomposition_multiplier(t_air)
-        lower, upper = reference_respiration_bounds(t_air)
+        annual = np.array([290.0, 330.0, 370.0])
+        theta = np.array([0.018, 0.0366, 0.08])
+        rh_ref = reference_respiration_rate(annual, theta, t_air)
 
-        assert lower * multiplier * DAYS_PER_YEAR == pytest.approx(low_in)
-        assert upper * multiplier * DAYS_PER_YEAR == pytest.approx(high_in)
+        for value, target, th in zip(rh_ref, annual, theta, strict=True):
+            multiplier = float(np.mean(np.exp(th * t_air)))
+            assert value * multiplier * DAYS_PER_YEAR == pytest.approx(target)
 
-    def test_a_warmer_record_needs_a_smaller_reference_rate(self):
-        """Same annual total, more decomposition-days, lower rate at 0 degC."""
-        cold = reference_respiration_bounds(np.full(365, 0.0))
-        warm = reference_respiration_bounds(np.full(365, 10.0))
-        assert warm[0] < cold[0]
-        assert warm[1] < cold[1]
+    def test_a_hotter_theta_needs_a_smaller_reference_rate(self):
+        """Same annual total, more decomposition per degree, lower rate at 0 C."""
+        t_air = np.linspace(-15.0, 20.0, 400)
+        cool, warm = reference_respiration_rate(
+            np.array([330.0, 330.0]), np.array([0.018, 0.08]), t_air
+        )
+        assert warm < cool
+
+    def test_it_is_the_mean_of_the_exponential_not_the_exponential_of_the_mean(self):
+        """Jensen again, at the point where it actually enters the prior."""
+        t_air = np.array([-20.0, -5.0, 5.0, 15.0, 25.0])
+        theta = 0.0366
+        rh_ref = float(reference_respiration_rate(330.0, theta, t_air))
+        naive = 330.0 / (float(np.exp(theta * t_air.mean())) * DAYS_PER_YEAR)
+        assert rh_ref < naive
+
+    @pytest.mark.parametrize("series", [np.array([]), np.array([1.0, np.nan])])
+    def test_it_refuses_an_unusable_driver_series(self, series):
+        with pytest.raises(ValueError):
+            reference_respiration_rate(330.0, 0.0366, series)
+
+    def test_it_refuses_a_non_positive_annual_total(self):
+        with pytest.raises(ValueError):
+            reference_respiration_rate(0.0, 0.0366, np.linspace(-5, 15, 50))
+
+
+class TestSomResidenceTimeFromStock:
+    def test_it_inverts_the_stock_partition(self):
+        """tau_som = (S/R - (1-f) tau_lit)/f must reproduce the stock it came from."""
+        annual_rh, f_som, tau_lit = 330.0, 0.7, 3.0
+        tau_som = som_residence_time_from_stock(annual_rh, f_som, tau_lit)
+        recovered = (
+            (1.0 - f_som) * annual_rh * tau_lit + f_som * annual_rh * tau_som
+        )
+        assert recovered == pytest.approx(SOIL_CARBON_STOCK_G_C_M2)
+
+    def test_the_adopted_range_brackets_the_site_derivation(self):
+        """The prior range must contain what the site's own numbers imply.
+
+        Guards against the range and its stated justification drifting apart.
+        """
+        implied = [
+            som_residence_time_from_stock(annual_rh, f_som, tau_lit)
+            for annual_rh in ANNUAL_RH_G_C_M2
+            for f_som in F_SOM_BOUNDS
+            for tau_lit in LITTER_RESIDENCE_TIME_YEARS
+        ]
+        # field residence times; the prior is stated at the 0 degC reference and
+        # so is longer by the mean multiplier M > 1.
+        assert min(implied) > 0.0
+        assert max(implied) < SOM_RESIDENCE_TIME_YEARS[1]
+
+    def test_it_refuses_impossible_inputs(self):
+        for bad in ((0.0, 0.7, 3.0), (330.0, 0.0, 3.0), (330.0, 1.5, 3.0)):
+            with pytest.raises(ValueError):
+                som_residence_time_from_stock(*bad)
 
 
 class TestDeriveLitterSomPools:
@@ -1028,9 +1086,17 @@ class TestSampleReparameterisedParameters:
         rh = frame["theta_lit"] * frame["c_lit_0"] + frame["theta_som"] * frame["c_som_0"]
         assert np.allclose(rh, frame["rh_ref"])
 
-        lower, upper = reference_respiration_bounds(t_air)
-        assert rh.min() >= lower - 1e-12
-        assert rh.max() <= upper + 1e-12
+        # and the annual total each draw actually realises is the one it sampled
+        multiplier = np.array(
+            [
+                float(np.mean(np.exp(th * t_air)))
+                for th in frame["temperature_exponent"].to_numpy()
+            ]
+        )
+        realised = frame["rh_ref"].to_numpy() * multiplier * DAYS_PER_YEAR
+        assert np.allclose(realised, frame["rh_annual"].to_numpy())
+        assert realised.min() >= ANNUAL_RH_G_C_M2[0] - 1e-9
+        assert realised.max() <= ANNUAL_RH_G_C_M2[1] + 1e-9
 
     def test_it_keeps_soil_respiration_off_the_impossible_scale(self, t_air):
         """Task 1's failure mode, stated as a regression test.
@@ -1058,9 +1124,11 @@ class TestSampleReparameterisedParameters:
         registry_lower, registry_upper = prior_bounds("c_som_0")
         assert frame["c_som_0"].median() < 0.25 * registry_upper
         assert frame["c_som_0"].min() > registry_lower
+        # and it should now sit in the neighbourhood of the measured stock
+        assert 0.5 < frame["c_som_0"].median() / SOIL_CARBON_STOCK_G_C_M2 < 1.5
 
     def test_sampled_respiration_parameters_stay_inside_their_new_bounds(self, t_air):
-        bounds = reparameterised_bounds(t_air)
+        bounds = reparameterised_bounds()
         _, frame = sample_reparameterised_parameters(
             512, rng=np.random.default_rng(4), t_air=t_air
         )

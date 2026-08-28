@@ -1,0 +1,46 @@
+==========================================================================
+  GPP investigation -- prior predictive against the measured range
+==========================================================================
+  block 1997-2010, 5113 days, 400 draws, seed 20260809
+
+==========================================================================
+  Prior predictive annual GPP, g C m-2 yr-1
+==========================================================================
+  median    2,570    IQR 542 to 3,162    5-95% 84 to 3,353
+  measured (Fig. 6)  952 to 1,104
+  median / measured midpoint = 2.50x
+  draws inside the measured range: 0.8%
+  draws above it:                  68.3%
+
+==========================================================================
+  Attribution -- Spearman correlation with annual GPP
+==========================================================================
+    lai_mean     +0.962
+    c_lf         -0.628
+    lma          -0.538
+    ceff         +0.241
+    f_lab        +0.230
+    f_fol        +0.139
+    cr_fall      -0.115
+    f_auto       -0.103
+    c_fol_0      +0.046
+    d_onset      -0.034
+    cr_onset     -0.012
+
+==========================================================================
+  Modelled LAI, and what it should be
+==========================================================================
+  mean LAI   median 5.09   5-95% 0.18 to 48.26
+  peak LAI   median 10.60
+  FI-Hyy projected LAI is about 3 (provisional, DECISIONS.md section 6)
+
+==========================================================================
+  GPP by ceff decile -- is ceff the lever?
+==========================================================================
+    ceff  10.5- 30.5   median GPP   2,216   inside measured   2.5%
+    ceff  30.5- 48.3   median GPP   2,333   inside measured   0.0%
+    ceff  48.3- 68.6   median GPP   2,517   inside measured   0.0%
+    ceff  68.6- 84.8   median GPP   2,932   inside measured   0.0%
+    ceff  84.8- 99.8   median GPP   2,934   inside measured   1.3%
+
+  -> reports\prior_diagnostics\gpp_investigation.csv

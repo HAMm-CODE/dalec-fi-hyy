@@ -84,6 +84,7 @@ from dalec.model_numpy import (
 )
 from dalec.parameters import (
     ALLOCATION_WEIGHT_ORDER,
+    ANNUAL_RH_G_C_M2,
     F_SOM_BOUNDS,
     LITTER_RESIDENCE_TIME_YEARS,
     PARAMETER_REGISTRY,
@@ -91,7 +92,7 @@ from dalec.parameters import (
     DalecParameters,
     derive_litter_som_pools,
     prior_bounds,
-    reference_respiration_bounds,
+    reference_respiration_rate,
     turnover_bounds_from_residence_time,
 )
 
@@ -1444,22 +1445,27 @@ def simplex_edge_weights(
 #: keep their names but take residence-time bounds instead of the Bloom &
 #: Williams ones; ``c_lit_0`` and ``c_som_0`` stop being sampled at all.
 REPARAMETERISED_SAMPLED: Final[tuple[str, ...]] = (
-    "rh_ref",
+    "rh_annual",
     "f_som",
     "theta_lit",
     "theta_som",
 )
-REPARAMETERISED_DERIVED: Final[tuple[str, ...]] = ("c_lit_0", "c_som_0")
+REPARAMETERISED_DERIVED: Final[tuple[str, ...]] = ("rh_ref", "c_lit_0", "c_som_0")
 
 
-def reparameterised_bounds(t_air: np.ndarray) -> dict[str, tuple[float, float]]:
+def reparameterised_bounds(t_air: np.ndarray | None = None) -> dict[str, tuple[float, float]]:
     """Prior bounds for the four sampled respiration parameters.
 
-    ``rh_ref`` depends on the driver series, so this needs the temperatures
-    rather than being a module constant. Everything else is fixed.
+    All four are now fixed constants. ``rh_annual`` is an annual total taken
+    straight from Ilvesniemi et al. (2009) Fig. 6, so unlike the superseded
+    ``rh_ref`` it needs no driver series to state: the temperature conversion
+    happens per draw inside :func:`sample_reparameterised_parameters`.
+
+    ``t_air`` is accepted and ignored, so existing callers keep working.
     """
+    del t_air
     return {
-        "rh_ref": reference_respiration_bounds(t_air),
+        "rh_annual": ANNUAL_RH_G_C_M2,
         "f_som": F_SOM_BOUNDS,
         "theta_lit": turnover_bounds_from_residence_time(LITTER_RESIDENCE_TIME_YEARS),
         "theta_som": turnover_bounds_from_residence_time(SOM_RESIDENCE_TIME_YEARS),
@@ -1506,7 +1512,7 @@ def sample_reparameterised_parameters(
             f"ALLOCATION_WEIGHT_ORDER {ALLOCATION_WEIGHT_ORDER}; that ordering is "
             "load-bearing and no conservation test would catch a permutation"
         )
-    bounds = reparameterised_bounds(t_air)
+    bounds = reparameterised_bounds()
     replaced = set(REPARAMETERISED_SAMPLED) | set(REPARAMETERISED_DERIVED)
     untouched = [
         n
@@ -1517,6 +1523,12 @@ def sample_reparameterised_parameters(
     draws = {name: rng.uniform(*prior_bounds(name), size=n_draws) for name in untouched}
     draws.update(
         {name: rng.uniform(*bounds[name], size=n_draws) for name in REPARAMETERISED_SAMPLED}
+    )
+    # Each draw's own Theta sets its own temperature multiplier, so every draw
+    # respires exactly its sampled annual total. Using one fixed Theta here
+    # drifted the median realised annual Rh off target by 7%.
+    draws["rh_ref"] = reference_respiration_rate(
+        draws["rh_annual"], draws["temperature_exponent"], t_air
     )
     c_lit_0, c_som_0 = derive_litter_som_pools(
         draws["rh_ref"], draws["f_som"], draws["theta_lit"], draws["theta_som"]

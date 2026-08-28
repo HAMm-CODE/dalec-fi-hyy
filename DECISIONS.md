@@ -482,17 +482,9 @@ Flagged here so they cannot quietly become fact:
 - `lma = 110` g C m⁻² is Chuter's Loobos reference value, used as a working value
   in the gate re-run. It is a sampled parameter, not a constant, and the Loobos
   figure is not a FI-Hyy measurement.
-- **The two residence-time ranges behind the reparameterised respiration prior**
-  carry no citation at all: τ_lit = 1–5 yr and τ_som = 20–100 yr were chosen as
-  round, defensible boreal spans. They set `theta_lit` and `theta_som`, and through
-  the steady-state derivation they set `c_lit_0` and `c_som_0` too, so they are the
-  single most load-bearing unsourced numbers in the project. See §7.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
-  judgement about boreal soils, not a measurement.
-- The annual litter input 280 (225–332) g C m⁻² yr⁻¹ attributed to Ilvesniemi et
-  al. (2009), and the 5,000–10,000 g C m⁻² soil inventory range it is checked
-  against, were supplied rather than read. **Neither has been verified against the
-  full paper**, which the standing project rule requires before either is cited.
+  judgement about boreal soils, not a measurement. It is now the only unsourced
+  input to the respiration prior: τ7 records sources for everything else.
 - `ACM_CALIBRATION_BOUNDS` currently holds only the `t_mean` row (7–30 °C). The
   remaining Williams et al. Table 1 rows — irradiance, LAI, CO₂ and the rest —
   have not been supplied, so `calibration_bound_coverage()` reports on
@@ -507,231 +499,252 @@ the site-calibrated parameter set rather than a config value.
 
 ## 7. Heterotrophic respiration is reparameterised — site-informed prior
 
-**Decided 2026-08-28. This supersedes the bounded-uniform priors on `c_lit_0`,
-`c_som_0`, `theta_lit` and `theta_som` in §1.** Everything else in §1 stands: the
-remaining 19 parameters keep their published uniform ranges, the allocation
-fractions keep the Dirichlet simplex, and there is still no EDC accept/reject.
+**Decided 2026-08-28, corrected the same day.** Supersedes the bounded-uniform
+priors on `c_lit_0`, `c_som_0`, `theta_lit` and `theta_som` in §1. Everything
+else in §1 stands.
+
+Source for every site number below: **Ilvesniemi, H., Levula, J., Ojansuu, R.,
+Kolari, P., Kulmala, L., Pumpanen, J., Launiainen, S., Vesala, T. and Nikinmaa,
+E. (2009). Long-term measurements of the carbon balance of a boreal Scots pine
+dominated forest ecosystem. *Boreal Environment Research* 14(4), 731–753.**
+Figure 6, p. 747. **Verified against the full paper**, not taken on report.
 
 ### The problem this fixes
 
-Tasks 1 and 2 independently isolated the same defect. Sampling `theta_som` and
-`c_som_0` as independent uniforms places the prior on two stocks whose *product*
-is a flux, and does not constrain that flux at all:
+Sampling `theta_som` and `c_som_0` as independent uniforms places the prior on
+two stocks whose *product* is a flux, and does not constrain that flux:
 
-| | superseded prior | reparameterised |
+| | superseded | reparameterised |
 |---|---:|---:|
-| median Rh at T = 0, g C m⁻² d⁻¹ | 42.4 | 0.61 |
-| maximum Rh at T = 0 | 211.9 | 0.73 |
-| median `c_som_0`, g C m⁻² | 99,468 | 5,257 |
-
-The site's entire net exchange is about 0.6 g C m⁻² d⁻¹. A prior whose median
-soil respiration is 42 is not weakly informative, it is wrong, and it is what
-drove Task 1's 83.7% failure rate.
+| median Rh at T = 0, g C m⁻² d⁻¹ | 42.4 | ≈ 0.7 |
+| maximum Rh at T = 0 | 211.9 | bounded by construction |
+| median `c_som_0`, g C m⁻² | 99,468 | ≈ 5,800 |
 
 ### The design
 
 Sampled:
 
-| parameter | prior | source |
+| parameter | prior | basis |
 |---|---|---|
-| `rh_ref` | U(0.4966, 0.7327) g C m⁻² d⁻¹ | Ilvesniemi mass balance, converted below |
-| `f_som` | U(0.5, 0.9), dimensionless | SOM share of Rh, see below |
+| `rh_annual` | U(290, 370) g C m⁻² yr⁻¹ | Fig. 6, decomposition of SOM |
+| `f_som` | U(0.5, 0.9) | judgement, §6 |
 | `theta_lit` | U(5.476×10⁻⁴, 2.738×10⁻³) d⁻¹ | τ_lit = 1–5 yr |
-| `theta_som` | U(2.738×10⁻⁵, 1.369×10⁻⁴) d⁻¹ | τ_som = 20–100 yr |
+| `theta_som` | U(4.488×10⁻⁵, 1.141×10⁻⁴) d⁻¹ | τ_som = 24–61 yr |
 
-Derived, not sampled:
+Derived:
 
 ```
+rh_ref  = rh_annual / (M(Theta_draw) * 365.25)
 c_lit_0 = (1 - f_som) * rh_ref / theta_lit
 c_som_0 =      f_som  * rh_ref / theta_som
 ```
 
-These are the stocks that produce `rh_ref` at steady state. A draw can no longer
-put 10⁵ g C m⁻² of soil carbon behind a fast turnover rate, because the stock is
-whatever the sampled flux and rate imply.
+`rh_ref` is defined at a reference temperature of **0 °C**, not a free choice:
+the A5/A6 multiplier `exp(Θ·T)` is one there.
 
-**`rh_ref` is defined at a reference temperature of 0 °C.** That is not a free
-choice: the A5/A6 multiplier is `exp(Θ·T)`, which is one at T = 0.
+### Correction 1 — the prior rests on Fig. 6, not on the mass balance
 
-### The annual-to-daily conversion
+**`rh_annual` comes from the measured flux, not from litter input.** Figure 6
+gives *decomposition of soil organic matter* directly as ~290–370 g C m⁻² yr⁻¹,
+obtained by splitting a measured soil CO₂ efflux of 577–737 g C m⁻² yr⁻¹ roughly
+50/50 between root-and-rhizosphere respiration and decomposition, on the basis of
+a girdling experiment at the site. **That is an attribution of a measured flux
+and assumes nothing about steady state**, so the sink objection recorded below
+does not touch it.
 
-At long-run steady state the annual heterotrophic respiration equals the annual
-litter input, so over a year
+**The 280 g C m⁻² yr⁻¹ litter input is corroboration only.** Figure 6's
+components — above-ground tree litter 142–204, below-ground tree litter ~90,
+ground vegetation ~15 — sum to 247–309, consistent with the 280 usually quoted.
+It is retained as `ANNUAL_LITTER_INPUT_G_C_M2` and used nowhere in the
+derivation, because **equating litter input with Rh assumes long-run steady
+state, which makes it an upper bound at this site, not an estimate**: FI-Hyy is
+a measured sink, so input necessarily exceeds decomposition. The two ranges
+overlap, which is the corroboration.
+
+**An earlier claim here was wrong and is withdrawn.** It said that if 280 is
+litter input then the implied Rh is 280 − 217 ≈ 63, making `rh_ref` more than
+four times too high. That does not hold: the accumulation goes overwhelmingly
+into **tree biomass**, which the paper puts at 242 g C m⁻² yr⁻¹ against an NEE of
+206, and it states that soil carbon accumulation could not be measured. Nothing
+licenses subtracting the whole ecosystem accumulation from the soil flux.
+
+### Correction 2 — the temperature conversion is now per draw
+
+At steady state, over a year,
 
 ```
-annual_input = rh_ref * Σ exp(Θ·T) = rh_ref * M * 365.25
+rh_annual = rh_ref * Σ exp(Θ·T) = rh_ref * M(Θ) * 365.25
 ```
 
-with `M` the **mean of the multiplier over the actual driver series**:
+**`M` is now computed from each draw's own sampled `temperature_exponent`**,
+rather than once at a fixed Θ. Under the fixed-Θ construction the realised annual
+respiration drifted off target for every draw whose Θ differed: median realised
+Rh was **299.8** g C m⁻² yr⁻¹ against an intended 280.
 
-| quantity | value |
-|---|---:|
-| mean `TA_F`, calibration block | 4.324 °C (sd 9.421) |
-| `M = mean(exp(0.0366·T))` — used | **1.2406** |
-| `exp(0.0366 · mean T)` — *not* used | 1.1715 |
-| Jensen gap | 5.6% |
+**That 299.8 is itself a result worth keeping.** It falls inside Fig. 6's
+independently measured 290–370, so the mass-balance estimate and the girdling-
+based flux attribution — two different methods, one assuming steady state and one
+not — agree at this site. That is a second corroboration, not a nuisance.
 
-**The naive form is wrong and the error is one-directional.** `exp` is convex, so
-the mean of the multiplier always exceeds the multiplier of the mean when
-temperature varies. Using `exp(Θ·mean T)` would have inflated `rh_ref` by 5.6%
-and, through the derivation above, every stock derived from it. Θ = 0.0366 °C⁻¹
-is the value measured from the FI-Hyy winter flux record itself (`EDA_NOTES.md`,
-eda05), not a value taken from the prior.
+With the fix the inversion is exact: realised annual Rh matches the sampled
+`rh_annual` to within 6×10⁻¹⁴ g C m⁻² yr⁻¹ on every draw.
 
-Implemented in `dalec.parameters.decomposition_multiplier` and
-`reference_respiration_bounds`; the multiplier is computed from the drivers at
-run time rather than hard-coded, so it cannot silently go stale if the block
-changes.
+`M` remains the **mean of the exponential**, never `exp` of the mean. `exp` is
+convex, the FI-Hyy daily temperature has sd 9.4 °C, and the gap is 5.6%:
+M = 1.2406 against a naive 1.1715 at Θ = 0.0366. The naive form would inflate
+every derived stock by that much.
 
-### Known inconsistency, recorded not hidden
+### Correction 3 — the residence times, and what was actually found
 
-`rh_ref`'s prior is built at the empirical Θ = 0.0366, but `temperature_exponent`
-is *itself sampled* over U(0.018, 0.08). A draw at Θ = 0.08 respires more over
-the year than its `rh_ref` was calibrated to deliver, and a draw at Θ = 0.018
-less. The steady-state mass balance therefore holds exactly only for draws near
-Θ ≈ 0.0366.
+**τ_lit = 1–5 yr is now sourced.** Yasso07 (Tuomi, M. et al. (2009), *Leaf litter
+decomposition — estimates of global variability based on Yasso07 model*,
+Ecological Modelling 220, 3362–3371, Table 1) gives labile AWEN decomposition
+rates of α_A = 0.66, α_W = 4.3, α_E = 0.35, α_N = 0.22 a⁻¹ — residence times of
+1.5, 0.23, 2.9 and 4.5 yr, which bracket the adopted range. Value read from the
+paper.
 
-This follows the specified construction and is left as specified. The alternative
-— recomputing `M` per draw from that draw's own Θ — would make the mass balance
-hold for every draw, and is the obvious next refinement if the prior predictive
-still shows an annual-total bias.
+**Yasso07's humus rate is deliberately not used.** α_H = 3.3×10⁻³ a⁻¹ implies 303
+yr, but Yasso's H is the recalcitrant fraction receiving ~4% of labile mass loss,
+whereas DALEC's SOM pool is bulk soil carbon carrying most of the heterotrophic
+flux. Different objects; the rate is not transferable. Adopting it would have put
+soil respiration an order of magnitude too low.
 
-### Citation status — READ THIS BEFORE CITING ANY OF IT
+**Liski & Westman: nothing usable found.** Both *Carbon storage in forest soil of
+Finland* papers (Biogeochemistry 36, 1997) are paywalled, and no residence or
+turnover time for southern-Finland forest soil surfaced in the accessible
+literature. Recorded as a null result rather than filled with a guess.
 
-| input | value | status |
-|---|---|---|
-| annual litter input | 280 (225–332) g C m⁻² yr⁻¹ | **supplied, not verified against the paper** |
-| soil inventory target | 5,000–10,000 g C m⁻² | **supplied, not verified** |
-| τ_lit | 1–5 yr | **not sourced — chosen as a defensible boreal span** |
-| τ_som | 20–100 yr | **not sourced — chosen as a defensible boreal span** |
-| Θ = 0.0366 °C⁻¹ | | measured in this project, eda05 |
-| M = 1.2406 | | computed in this project from `TA_F` |
+**τ_som = 24–61 yr is therefore derived from the site's own measurements.** The
+derivation, which is why it is not simply a wider guess:
 
-The two residence-time ranges are **the weakest link in this prior and they carry
-no citation**. They were chosen as round, defensible boreal values, and the
-standing project rule — verify every citation against the full paper before using
-it — has *not* been satisfied for them. See §6.
+> `tau` in this model is `1/theta`, the e-folding time **at the 0 °C reference**.
+> The field residence time is shorter by the mean multiplier, because at steady
+> state `C = R·tau/M`. So from a measured stock `S`, respiration `R` and share
+> `f`:
+>
+> ```
+> tau_som = (S * M / R - (1 - f) * tau_lit) / f
+> ```
+>
+> With S = 6560 g C m⁻² (Fig. 6, measured), R = 290–370, M = 1.2406 (empirical Θ)
+> to 1.3677 (prior-median Θ), f ∈ [0.5, 0.9] and τ_lit ∈ [1, 5], this gives
+> **23.9–60.9 yr**. Adopted as 24–61.
 
-**Consequently CHECK 1 is a consistency check, not independent corroboration.**
-The derived `c_som_0` lands in the published inventory range partly because
-τ_som was chosen at a plausible boreal magnitude, and the agreement is sensitive
-to that choice:
+**Omitting the `M` factor understates τ_som by about 25%** and the implied soil
+stock by the same factor — a real trap, since `tau` reads naturally as a field
+residence time but is defined at the reference temperature.
 
-| τ_som range (yr) | median `c_som_0` | share inside 5,000–10,000 |
-|---|---:|---:|
-| 10–50 | 2,618 | 14.1% |
-| 15–75 | 3,925 | 28.6% |
-| **20–100 (adopted)** | **5,240** | **39.4%** |
-| 25–80 | 5,992 | 55.3% |
-| 30–150 | 7,879 | 52.0% |
-| 50–200 | 12,581 | 29.5% |
+The adopted range was taken from this derivation, **not** chosen by scoring
+candidate ranges against Check 1. A scan over candidates did independently favour
+28–62 yr as best-centring the stock, which corroborates the derivation; it did
+not select it.
 
-(Sensitivity table from an independent 200,000-draw sample, which is why the
-adopted row reads 5,240 against the 5,257 quoted above; the difference is
-sampling noise, not a discrepancy.)
+### Check 1 is no longer an independent validation
 
-The result is not circular — τ_som was not tuned to maximise the last column, and
-25–80 would have scored better — but it is not an independent test either, and
-must not be written up as one.
+Stated plainly because it changes what the check means. `c_som_0` is now derived
+through a relation that takes the measured soil carbon stock as an **input**. The
+same number cannot be both a prior input and a validation target. Under the old
+unsourced τ_som, Check 1 was a weak consistency check; it is now close to
+tautological, and the implied total soil carbon landing near 6560 confirms the
+arithmetic rather than the science.
 
-### The residence-time definition
+This is a deliberate trade: a well-sourced prior built on a direct measurement is
+worth more than a weak test against a supplied range. What replaces Check 1 as a
+test is the prior predictive itself — Checks 2 and 3.
 
-`τ = 1/θ` is the e-folding time **against the respiratory pathway alone**. The
-litter pool's total residence time is shorter than τ_lit, because `theta_min`
-also drains it to SOM and that transfer is not a respiratory loss. Reading a
-published *pool* turnover time straight into `theta_lit` would attribute the
-mineralisation flux to respiration and understate the litter stock. Anyone
-replacing these ranges with sourced values must check which quantity the source
-reports.
+### Known residual inconsistency
 
-### `f_som`
+`rh_annual` is a **steady-state** relation: it assumes the stocks that produce
+`rh_annual` are the stocks the model starts with. FI-Hyy is a sink, so the true
+pools are growing and the initial condition is only approximately at steady
+state. The magnitude is bounded by the accumulation the paper attributes to soil,
+which it says could not be measured — so this cannot presently be quantified. It
+is recorded, not solved.
 
-U(0.5, 0.9). Boreal heterotrophic respiration is dominated by humus and mineral
-soil rather than by fresh litter, but not overwhelmingly so. This range is a
-judgement, not a measurement, and belongs in §6 with the residence times.
+### The three acceptance checks — results after the corrections, 2026-08-28
 
-### The three acceptance checks — results, 2026-08-28
-
-Run by `scripts/10_reparameterised_prior.py`, 1000 draws, seed 20260809, block
+`scripts/10_reparameterised_prior.py`, 1000 draws, seed 20260809, block
 1997–2010. Full output in `reports/prior_diagnostics/reparameterised_checks.txt`.
 
-| check | result | against | verdict |
-|---|---:|---:|---|
-| 1. derived `c_som_0` in 5,000–10,000 g C m⁻² | median 5,257, 39.6% inside | superseded median 99,468, 2.5% inside | **pass, with the caveat above** |
-| 2a. prior draw failure rate | **2.9%** | 83.7% | **pass** |
-| 2b. coverage of the 90% band | **0.724** | 0.651 | improved, still short of 0.90 |
-| 3. prior predictive median annual NEE | **+543.8** | observed −215.8 | **fail — wrong sign** |
-
-Checks 1 and 2 are about heterotrophic respiration and both moved sharply the
-right way. Rh at T = 0 is now bounded by construction at 0.50–0.73 g C m⁻² d⁻¹
-where the superseded prior reached 211.89.
-
-### Why check 3 fails, and it is not the respiration prior
-
-Attribution in `reports/prior_diagnostics/check3_attribution.txt`, 250 draws.
-
-**Not the Θ inconsistency.** The obvious suspect was the mismatch recorded above
-— `rh_ref` built at Θ = 0.0366 while `temperature_exponent` samples U(0.018,
-0.08). Quantified, it inflates median annual Rh from 280 to **299.8**, +19.8
-(1.07×), with a Spearman correlation against annual NEE of only 0.203. It cannot
-account for a discrepancy of +759, and the refinement suggested above would not
-fix check 3.
-
-**The cause is GPP.** Annual totals, modelled median against observed:
-
-| flux | modelled median | observed | ratio |
+| check | before corrections | after | Task 1 baseline |
 |---|---:|---:|---:|
-| GPP | 2,515 | 1,103 (`gpp_nt` 1090, `gpp_dt` 1116) | **2.3×** |
-| Ra + Rh | 2,307 | 886 (`reco_nt` 887, `reco_dt` 885) | **2.6×** |
-| NEE | +347 to +544 | −215.8 | wrong sign |
+| 1. `c_som_0` inside 5,000–10,000 | 39.6% | **58.3%** | 2.5% |
+| 1. `c_som_0` median, g C m⁻² | 5,257 | **5,784** | 99,468 |
+| 1. total soil C median | — | **5,932** (measured 6,560) | — |
+| 2a. draw failure rate | 2.9% | **1.7%** | 83.7% |
+| 2b. coverage of the 90% band | 0.724 | **0.703** | 0.651 |
+| 3. median annual NEE | +543.8 | **+575.8** | — |
 
-Both gross fluxes are roughly 2.4× too large and NEE is their small difference,
-so a modest proportional error in either produces a large, wrong-signed net. The
-`ceff` prior U(10, 100) is the immediate suspect: the GPP magnitude gate passed
-at `ceff` ≈ 11.7, near the very bottom of that range, and Task 2's one-at-a-time
-optimum was ≈ 30. The prior median near 55 is far above both.
+Rh at T = 0 is bounded by construction: median 0.66, maximum 0.92 g C m⁻² d⁻¹,
+against the superseded prior's 42.50 and 208.51.
 
-**This is outside the reparameterisation.** `c_lit_0` and `c_som_0` no longer
-carry the error; GPP does. Fixing it means revisiting the `ceff` prior, which is
-a separate decision and is not taken here.
+**Checks 2b and 3 moved slightly the wrong way, and that is expected.** The
+corrections raised the respiration target from an effective ~300 to a sampled
+290–370, median 330, because Fig. 6's measured flux attribution is higher than
+the mass-balance figure the prior previously used. More Rh means a more positive
+NEE. The corrections were made for correctness of sourcing, not to improve
+Check 3, and **Check 3 cannot improve while GPP is wrong** — see below.
 
-### The steady-state premise is contradicted by the data
+Check 1 is no longer an independent validation; see the subsection above.
 
-Recorded because it undercuts the derivation in principle, whatever happens to
-`ceff`.
+### Why check 3 fails: GPP, not respiration
 
-`rh_ref` is built on "annual litter input, all of which decomposes at long-run
-steady state", so annual Rh = annual litter input = 280. **FI-Hyy is not at
-steady state.** It is a measured sink of 217 g C m⁻² yr⁻¹ over the calibration
-block (`Reco` − `GPP` = 886 − 1103 = −217, matching the observed NEE of −215.8 to
-1.2 g). At a sink, litter input necessarily *exceeds* Rh, by exactly the
-accumulation:
+Full attribution in `reports/prior_diagnostics/FINDINGS_gpp.md`
+(`scripts/11_gpp_investigation.py`).
 
-| `f_auto` | Ra | implied Rh | litter input | accumulating |
-|---:|---:|---:|---:|---:|
-| 0.3 | 331 | 555 | 772 | 217 |
-| 0.4 | 441 | 445 | 662 | 217 |
-| 0.5 | 552 | 335 | 552 | 217 |
-| 0.6 | 662 | 224 | 441 | 217 |
-| 0.7 | 772 | 114 | 331 | 217 |
+| flux | modelled median | measured | ratio |
+|---|---:|---:|---:|
+| GPP | 2,570 | 952–1,104 (Fig. 6) | **2.50×** |
+| NEE | +575.8 | −215.8 | wrong sign |
 
-Equating the two therefore overstates Rh, or understates litter input, by about
-217 g C m⁻² yr⁻¹ — comparable to the 280 itself.
+Only 0.8% of draws produce a GPP inside the measured range; 68.3% sit above it.
 
-Two consequences worth stating plainly:
+**`ceff` is not the cause, contrary to what this section previously recorded.**
+Across its full tenfold prior range median GPP moves by 1.32×, and the lowest
+quintile still overshoots by more than double; Spearman correlation is +0.241.
+ACM's light interception saturates, so canopy efficiency has little leverage in
+a dense canopy.
 
-1. **Which quantity is 280?** The derivation uses it as Rh. Read as Rh it is
-   consistent with the site's own partitioning near `f_auto` ≈ 0.55, which is
-   inside the prior. Read as *litter input* — which is what the source is said
-   to report — the corresponding Rh is 280 − 217 ≈ 63, and `rh_ref` would be
-   more than four times too high. **The two readings differ by a factor of 4.4
-   and the correct one is not yet established**, which is another reason the
-   Ilvesniemi figure must be checked against the paper before use (§6).
-2. The partitioned products could supply this directly. `reco_nt`/`reco_dt` are
-   already loaded, and Rh = `Reco` − `f_auto`·GPP is a per-draw quantity needing
-   no literature value at all. It is model output rather than observation (§1)
-   and so cannot enter the likelihood, but it can inform a prior. Not adopted
-   here; recorded as the obvious alternative.
+**Leaf area is the cause**, correlating +0.962 with annual GPP. Modelled mean LAI
+has median 5.09 and a 95th percentile of 48.26 against a site value near 3,
+driven by a positive feedback — more leaf area gives more GPP gives more foliar
+allocation. The measurable root cause is allocation: prior draws send 24.0% of
+GPP to foliage and labile, where the site's measured needle litterfall of 154
+g C m⁻² yr⁻¹ over GPP ≈ 1030 implies 15.0%.
+
+**Priors alone will not close it.** At the site's own LAI of about 3 the model
+still yields ~1,800 g C m⁻² yr⁻¹; the measured range corresponds to LAI ≈ 1–2.
+A residual factor of about 1.7 survives any canopy correction and belongs to
+model structure — LIMITATIONS §1 (no high-latitude temperature limitation on
+photosynthesis) and §2 (no boreal ACM coefficient set). Not fixed here, and not
+to be fixed by fitting `ceff` to the measured GPP.
+
+### The steady-state premise, and its actual scope
+
+The derivation assumes the initial stocks are those that produce `rh_annual` at
+steady state. **FI-Hyy is not at steady state**: it is a measured sink of about
+217 g C m⁻² yr⁻¹ over the calibration block (`Reco` − `GPP` = 886 − 1103 = −217,
+matching the observed NEE of −215.8 to 1.2 g).
+
+**This bears on the litter-input route, which is why that route is corroboration
+only.** At a sink, litter input necessarily exceeds decomposition, so equating
+them makes the litter input an upper bound on Rh rather than an estimate of it.
+
+**It does not bear on the Fig. 6 route the prior actually uses.** That number is
+an attribution of a *measured* soil CO₂ efflux between root respiration and
+decomposition, via girdling. It makes no steady-state assumption at all.
+
+What remains is second-order: the initial pools are set to their steady-state
+values while the true pools are slowly growing. The accumulation attributable to
+soil is what would size that error, and the paper states soil carbon accumulation
+could not be measured — the 217 goes overwhelmingly into tree biomass, which the
+paper puts at 242 g C m⁻² yr⁻¹. So the residual is real, unquantified, and
+recorded rather than solved.
+
+An alternative that needs no literature value at all: `reco_nt`/`reco_dt` are
+already loaded, and Rh = `Reco` − `f_auto`·GPP is a per-draw quantity. It is
+model output rather than observation (§1), so it cannot enter the likelihood, but
+it could inform a prior. Not adopted; recorded.
 
 ### Where it lives
 
@@ -760,5 +773,14 @@ reproducible.
 - Richardson, A. D. et al. (2010). Estimating parameters of a forest ecosystem C
   model with measurements of stocks and fluxes as joint constraints. *Oecologia*
   164, 25–40.
+- Ilvesniemi, H., Levula, J., Ojansuu, R., Kolari, P., Kulmala, L., Pumpanen,
+  J., Launiainen, S., Vesala, T. and Nikinmaa, E. (2009). Long-term measurements
+  of the carbon balance of a boreal Scots pine dominated forest ecosystem.
+  *Boreal Environment Research* 14(4), 731–753. **Fig. 6 verified against the
+  full paper.** Source of every FI-Hyy carbon-balance number in §7.
+- Tuomi, M., Thum, T., Järvinen, H., Fronzek, S., Berg, B., Harmon, M.,
+  Trofymow, J. A., Sevanto, S. and Liski, J. (2009). Leaf litter decomposition —
+  estimates of global variability based on Yasso07 model. *Ecological Modelling*
+  220, 3362–3371. Table 1 AWEN rates; source of τ_lit.
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux
   processing pipeline. *Scientific Data* 7, 225.

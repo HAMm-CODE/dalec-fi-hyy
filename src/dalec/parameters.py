@@ -51,6 +51,7 @@ __all__ = [
     "ALLOCATION_PARAMETERS",
     "ALLOCATION_WEIGHT_ORDER",
     "ANNUAL_LITTER_INPUT_G_C_M2",
+    "ANNUAL_RH_G_C_M2",
     "DAYS_PER_YEAR",
     "EMPIRICAL_TEMPERATURE_EXPONENT",
     "F_SOM_BOUNDS",
@@ -62,6 +63,7 @@ __all__ = [
     "POOL_STATE_PARAMETERS",
     "RESPIRATION_REFERENCE_TEMPERATURE_C",
     "SIMPLEX_PARAMETERS",
+    "SOIL_CARBON_STOCK_G_C_M2",
     "SOM_RESIDENCE_TIME_YEARS",
     "TURNOVER_PARAMETERS",
     "DalecParameters",
@@ -71,8 +73,9 @@ __all__ = [
     "derive_litter_som_pools",
     "phenology_psi_f",
     "prior_bounds",
-    "reference_respiration_bounds",
+    "reference_respiration_rate",
     "solve_psi",
+    "som_residence_time_from_stock",
     "turnover_bounds_from_residence_time",
 ]
 
@@ -551,14 +554,37 @@ def phenology_psi_f(c_lf: float, cr_fall: float) -> float:
 #: decomposition multiplier ``exp(Theta * T)`` is one here by construction.
 RESPIRATION_REFERENCE_TEMPERATURE_C: Final[float] = 0.0
 
-#: Annual litter input to the soil at FI-Hyy, g C m-2 yr-1, as (low, central,
-#: high). Ilvesniemi et al. (2009) mass balance. At long-run steady state the
-#: whole input decomposes, so this is also the annual heterotrophic respiration.
-ANNUAL_LITTER_INPUT_G_C_M2: Final[tuple[float, float, float]] = (225.0, 280.0, 332.0)
+#: Annual heterotrophic respiration at FI-Hyy, g C m-2 yr-1, as (low, high).
+#:
+#: Ilvesniemi et al. (2009) Fig. 6, "decomposition of soil organic matter",
+#: ~290-370. This is an *attribution of a measured flux*: soil CO2 efflux was
+#: measured at 577-737 g C m-2 yr-1 and split roughly 50/50 between root and
+#: rhizosphere respiration and decomposition on the basis of a girdling
+#: experiment at the site. **It does not assume steady state**, so the fact that
+#: FI-Hyy is a sink does not bias it.
+ANNUAL_RH_G_C_M2: Final[tuple[float, float]] = (290.0, 370.0)
 
-#: Empirical temperature sensitivity used to convert the annual flux to a daily
-#: reference rate, degC-1. Measured from the FI-Hyy winter flux record itself
-#: (EDA_NOTES.md, eda05), not taken from the prior.
+#: Annual litter input, g C m-2 yr-1, as (low, central, high). Ilvesniemi et al.
+#: (2009): above-ground tree litter 142-204, below-ground tree litter ~90,
+#: ground vegetation ~15, summing to 247-309 and consistent with the 280 often
+#: quoted.
+#:
+#: **Corroboration only. Not the basis of the prior.** Equating litter input with
+#: heterotrophic respiration assumes long-run steady state, and FI-Hyy is a
+#: measured sink of ~206 g C m-2 yr-1. At a sink, input necessarily exceeds
+#: decomposition, so the litter input is an **upper bound** on Rh, not an
+#: estimate of it. The bound is not violated: 247-309 sits above the 290-370
+#: flux attribution only in part, and the two overlap, which is the corroboration.
+ANNUAL_LITTER_INPUT_G_C_M2: Final[tuple[float, float, float]] = (247.0, 280.0, 309.0)
+
+#: Measured soil carbon stock at FI-Hyy, g C m-2. Ilvesniemi et al. (2009)
+#: Fig. 6. Used to derive the SOM residence time below; see DECISIONS.md section
+#: 7 for why that retires Check 1 as an independent validation.
+SOIL_CARBON_STOCK_G_C_M2: Final[float] = 6560.0
+
+#: Empirical temperature sensitivity, degC-1, measured from the FI-Hyy winter
+#: flux record (EDA_NOTES.md, eda05). Retained as the reporting reference; the
+#: prior itself now uses each draw's own sampled temperature_exponent.
 EMPIRICAL_TEMPERATURE_EXPONENT: Final[float] = 0.0366
 
 #: Residence times against the respiratory pathway, years, as (low, high).
@@ -569,12 +595,36 @@ EMPIRICAL_TEMPERATURE_EXPONENT: Final[float] = 0.0366
 #: transfer is not a respiratory loss. Reading a published *pool* turnover time
 #: straight into ``theta_lit`` would attribute the mineralisation flux to
 #: respiration and understate the litter stock.
+#:
+#: ``tau_lit`` 1-5 yr is supported by Yasso07 (Tuomi et al. 2009, Table 1): the
+#: labile AWEN fractions decompose at 0.66, 4.3, 0.35 and 0.22 a-1, i.e.
+#: residence times of 1.5, 0.23, 2.9 and 4.5 years, which bracket this range.
+#:
+#: ``tau_som`` 20-45 yr is derived from the site's own measurements rather than
+#: from the literature, because no usable published value was found. With total
+#: soil carbon S, total heterotrophic respiration R and SOM share f,
+#:
+#:     S / R = (1 - f) * tau_lit + f * tau_som
+#:
+#: **at the reference temperature**, which matters: tau = 1 / theta is the
+#: e-folding time at 0 degrees C, while the field residence time is tau / M.
+#: At steady state C = R * tau / M, so tau_ref = (S * M / R - (1-f) * tau_lit)/f.
+#: S = 6560, R = 290-370 and M = 1.2406 (empirical Theta) to 1.3677 (prior
+#: median Theta) give tau_som of 23.9-60.9 yr across f in [0.5, 0.9] and tau_lit
+#: in [1, 5]. Adopted as 24-61 yr. Omitting the M factor would understate it by
+#: about 25% and the implied soil stock by the same factor.
+#:
+#: Yasso07's humus rate alpha_H = 3.3e-3 a-1 (303 yr) is **not** used: Yasso's H
+#: is the recalcitrant fraction receiving about 4% of labile mass loss, whereas
+#: DALEC's SOM pool is bulk soil carbon carrying most of the heterotrophic flux.
+#: They are different objects and the rate is not transferable.
 LITTER_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (1.0, 5.0)
-SOM_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (20.0, 100.0)
+SOM_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (24.0, 61.0)
 
 #: SOM share of total heterotrophic respiration, dimensionless, as (low, high).
 #: Boreal heterotrophic respiration is dominated by the humus and mineral soil
-#: rather than by fresh litter, but not overwhelmingly so.
+#: rather than by fresh litter, but not overwhelmingly so. A judgement, not a
+#: measurement.
 F_SOM_BOUNDS: Final[tuple[float, float]] = (0.5, 0.9)
 
 #: Days per year used for every annual-to-daily conversion here.
@@ -613,42 +663,81 @@ def decomposition_multiplier(
     return float(np.mean(np.exp(float(temperature_exponent) * values)))
 
 
-def reference_respiration_bounds(
+def reference_respiration_rate(
+    annual_rh: np.ndarray | float,
+    temperature_exponent: np.ndarray | float,
     t_air: np.ndarray,
-    *,
-    temperature_exponent: float = EMPIRICAL_TEMPERATURE_EXPONENT,
-    annual_input: tuple[float, float, float] = ANNUAL_LITTER_INPUT_G_C_M2,
-) -> tuple[float, float]:
-    """Prior bounds on ``rh_ref``, g C m-2 d-1 at the reference temperature.
+) -> np.ndarray:
+    """Daily heterotrophic respiration at the reference temperature, g C m-2 d-1.
 
-    At long-run steady state the annual heterotrophic respiration equals the
-    annual litter input. Over a year,
+    Inverts the annual total for each draw **at that draw's own Theta**:
 
-        annual_input = rh_ref * sum(exp(Theta * T)) = rh_ref * M * DAYS_PER_YEAR
+        annual_rh = rh_ref * sum(exp(Theta * T)) = rh_ref * M(Theta) * 365.25
 
-    with ``M`` the mean multiplier, so ``rh_ref = annual_input / (M * 365.25)``.
+    so ``rh_ref = annual_rh / (M(Theta) * 365.25)``.
+
+    Using a single multiplier computed at one fixed Theta, while
+    ``temperature_exponent`` is itself sampled over U(0.018, 0.08), is an
+    inconsistency: the realised annual respiration then departs from the target
+    for every draw whose Theta is not that fixed value. Measured on the earlier
+    construction, median realised annual Rh drifted from an intended 280 to
+    299.8 g C m-2 yr-1. Computing ``M`` per draw removes the drift entirely, so
+    every draw respires its sampled annual total by construction.
+
+    ``M`` is the mean of the exponential and not the exponential of the mean.
+    ``exp`` is convex, so the two differ by Jensen's inequality -- about 6% at
+    FI-Hyy, where daily air temperature has a standard deviation near 9.4
+    degrees C. The naive form would inflate ``rh_ref`` and every stock derived
+    from it.
 
     Parameters
     ----------
-    t_air
-        Daily mean air temperature over the record, degrees C. The multiplier is
-        computed from the actual drivers rather than assumed.
+    annual_rh
+        Target annual heterotrophic respiration per draw, g C m-2 yr-1.
     temperature_exponent
-        Theta used for the conversion.
-    annual_input
-        ``(low, central, high)`` annual litter input, g C m-2 yr-1. The central
-        value sets no bound; it is carried so callers can report it.
+        Theta per draw, degC-1.
+    t_air
+        Daily mean air temperature over the record, degrees C.
 
     Returns
     -------
-    ``(lower, upper)`` bounds for a uniform prior on ``rh_ref``.
+    ``rh_ref`` per draw, g C m-2 d-1 at the reference temperature.
     """
-    low, _central, high = annual_input
-    if not 0.0 < low <= high:
-        raise ValueError(f"annual litter input bounds are not ordered: {annual_input!r}")
-    multiplier = decomposition_multiplier(t_air, temperature_exponent)
-    scale = multiplier * DAYS_PER_YEAR
-    return low / scale, high / scale
+    values = np.asarray(t_air, dtype=float)
+    if values.size == 0:
+        raise ValueError("cannot take a temperature multiplier over an empty series")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("driver temperature series contains non-finite values")
+    target = np.asarray(annual_rh, dtype=float)
+    theta = np.asarray(temperature_exponent, dtype=float)
+    if np.any(target <= 0.0):
+        raise ValueError("annual heterotrophic respiration must be positive")
+    multiplier = np.mean(np.exp(theta[..., None] * values), axis=-1)
+    return target / (multiplier * DAYS_PER_YEAR)
+
+
+def som_residence_time_from_stock(
+    annual_rh: float,
+    f_som: float,
+    litter_residence_time_years: float,
+    soil_carbon_stock: float = SOIL_CARBON_STOCK_G_C_M2,
+) -> float:
+    """SOM residence time implied by a measured stock and respiration, years.
+
+    From ``S = (1 - f) * R * tau_lit + f * R * tau_som``, the partition of a
+    measured soil carbon stock between a fast litter pool and a slow SOM pool:
+
+        tau_som = (S / R - (1 - f) * tau_lit) / f
+
+    Used to derive :data:`SOM_RESIDENCE_TIME_YEARS`, and retained so that
+    derivation is reproducible rather than a bare pair of numbers.
+    """
+    if annual_rh <= 0.0:
+        raise ValueError("annual heterotrophic respiration must be positive")
+    if not 0.0 < f_som <= 1.0:
+        raise ValueError("f_som must lie in (0, 1]")
+    effective = soil_carbon_stock / annual_rh
+    return (effective - (1.0 - f_som) * litter_residence_time_years) / f_som
 
 
 def turnover_bounds_from_residence_time(

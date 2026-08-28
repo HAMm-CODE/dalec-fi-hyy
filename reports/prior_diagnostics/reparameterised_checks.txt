@@ -8,70 +8,73 @@
 ==========================================================================
   Construction of the rh_ref prior
 ==========================================================================
-  annual litter input      280 g C m-2 yr-1  (range 225-332)
+  annual Rh (Fig. 6)       290-370 g C m-2 yr-1   <- the prior basis
+  annual litter input      247-309   <- corroboration only, steady-state upper bound
+  soil carbon stock        6560 g C m-2 (Fig. 6, measured)
   mean TA_F                4.324 degC (sd 9.421)
   M = mean(exp(0.0366 T))  1.2406   <- from the drivers
   exp(0.0366 mean T)       1.1715   <- NOT used, -5.6% (Jensen)
-  rh_ref = input / (M * 365.25)
-  residence times          litter 1-5 yr, SOM 20-100 yr
-    rh_ref     U(0.496565, 0.732709)
+  rh_ref = rh_annual / (M(Theta_draw) * 365.25), M computed PER DRAW
+  residence times          litter 1-5 yr, SOM 24-61 yr
+    rh_annual  U(290, 370)
     f_som      U(0.5, 0.9)
     theta_lit  U(0.00054757, 0.00273785)
-    theta_som  U(2.73785e-05, 0.000136893)
+    theta_som  U(4.48828e-05, 0.000114077)
 
 ==========================================================================
   CHECK 1 -- derived c_som_0 against the 5,000-10,000 g C m-2 inventory
 ==========================================================================
-  c_som_0   min    1,851   2.5%    2,572   median    5,257   97.5%   15,276   max   23,923
-            IQR 3,880 to 7,870
-  c_lit_0   min       19   2.5%       32   median      111   97.5%      379   max      659
-            IQR 73 to 170
+  c_som_0   min    2,075   2.5%    3,016   median    5,784   97.5%   11,706   max   18,119
+            IQR 4,523 to 7,469
+  c_lit_0   min       18   2.5%       34   median      119   97.5%      416   max      740
+            IQR 77 to 184
+  total soil C  median 5,932   IQR 4,681 to 7,607   against the measured 6,560
 
-  prior mass inside the inventory range   39.6%
-  below 5,000: 46.2%     above 10,000: 14.3%
+  prior mass inside the inventory range   58.3%
+  below 5,000: 34.5%     above 10,000: 7.2%
 
   superseded independent-uniform prior, for contrast:
-    median 99,468   inside the range 2.5%
-  Rh at T=0, reparameterised  median     0.61   max       0.73  g C m-2 d-1
-  Rh at T=0, superseded       median    42.39   max     211.89  g C m-2 d-1
+    median 100,371   inside the range 2.5%
+  Rh at T=0, reparameterised  median     0.66   max       0.92  g C m-2 d-1
+  Rh at T=0, superseded       median    42.50   max     208.51  g C m-2 d-1
 
 ==========================================================================
   CHECK 2 -- failure rate and coverage
 ==========================================================================
   running 1000 forward integrations...
       100 / 1000   failed so far: 1
-      200 / 1000   failed so far: 4
-      300 / 1000   failed so far: 10
-      400 / 1000   failed so far: 10
-      500 / 1000   failed so far: 13
-      600 / 1000   failed so far: 14
-      700 / 1000   failed so far: 17
-      800 / 1000   failed so far: 20
-      900 / 1000   failed so far: 26
-     1000 / 1000   failed so far: 29
+      200 / 1000   failed so far: 2
+      300 / 1000   failed so far: 5
+      400 / 1000   failed so far: 5
+      500 / 1000   failed so far: 5
+      600 / 1000   failed so far: 6
+      700 / 1000   failed so far: 8
+      800 / 1000   failed so far: 10
+      900 / 1000   failed so far: 15
+     1000 / 1000   failed so far: 17
 
-    usable                     971    97.1%
-    |NEE| >30                   26     2.6%
+    usable                     983    98.3%
+    |NEE| >30                   14     1.4%
     pool growth >100x            3     0.3%
 
-  failure rate   29 / 1000 = 2.9%
+  failure rate   17 / 1000 = 1.7%
   Task 1 was     83.7%
-  change         -80.8 points
+  change         -82.0 points
 
-  coverage       0.724
+  coverage       0.703
   Task 1 was     0.651
-  change         +0.073   (target ~0.90)
+  change         +0.052   (target ~0.90)
 
 ==========================================================================
   CHECK 3 -- prior predictive median annual NEE
 ==========================================================================
-  prior predictive median      +543.8 g C m-2 yr-1
-  IQR                           -69.4 to +1193.9
-  5-95%                        -789.3 to +2099.5
+  prior predictive median      +575.8 g C m-2 yr-1
+  IQR                           -22.6 to +1221.0
+  5-95%                        -717.1 to +2138.1
 
   observed, assimilable days in block      -215.8
   quoted target                             -206.0
-  difference, median - observed             +759.5
+  difference, median - observed             +791.6
   observed inside the prior 5-95%?       yes
 
   draws -> reports\prior_diagnostics\reparameterised_draws.csv
