@@ -13,6 +13,8 @@ from conftest import SyntheticFluxnet, make_parameters, synthetic_extremes
 from dalec.data_io import MISSING_VALUE, SiteData, build_site_data, load_fluxnet_dd
 from dalec.diagnostics import (
     HALFHOURS_PER_DAY,
+    REPARAMETERISED_DERIVED,
+    REPARAMETERISED_SAMPLED,
     SUGGESTED_PEAK_OFFSET_DAYS,
     SWEEP_POINTS,
     annual_gpp_comparison,
@@ -27,13 +29,24 @@ from dalec.diagnostics import (
     prior_sweep_values,
     randunc_audit,
     randunc_relationships,
+    reparameterised_bounds,
     sample_prior_parameters,
+    sample_reparameterised_parameters,
     seasonal_timing,
     simplex_edge_weights,
     temperature_proxy_comparison,
 )
 from dalec.model_numpy import DalecOutput, run_dalec2
-from dalec.parameters import PARAMETER_REGISTRY, prior_bounds
+from dalec.parameters import (
+    ANNUAL_LITTER_INPUT_G_C_M2,
+    DAYS_PER_YEAR,
+    PARAMETER_REGISTRY,
+    decomposition_multiplier,
+    derive_litter_som_pools,
+    prior_bounds,
+    reference_respiration_bounds,
+    turnover_bounds_from_residence_time,
+)
 
 #: Roughly calibrates the fake photosynthesis routine below so that its annual
 #: total lands near the synthetic partitioned products at mid-range ceff.
@@ -869,3 +882,231 @@ def test_loglik_weights_days_by_their_own_sigma(block: SiteData) -> None:
     cost_tight = gaussian_loglik(base, block) - gaussian_loglik(shift_tight, block)
     cost_loose = gaussian_loglik(base, block) - gaussian_loglik(shift_loose, block)
     assert cost_tight > cost_loose
+
+
+# ---------------------------------------------------------------------------
+# Reparameterised heterotrophic respiration (DECISIONS.md section 7)
+# ---------------------------------------------------------------------------
+
+
+class TestDecompositionMultiplier:
+    def test_it_is_the_mean_of_the_exponential_not_the_exponential_of_the_mean(self):
+        """Jensen's inequality is the whole point of this function.
+
+        A prior built on exp(Theta * mean T) understates the multiplier and so
+        overstates rh_ref and every stock derived from it. The gap is one-
+        directional, so a test on the ordering is the honest assertion.
+        """
+        t_air = np.array([-20.0, -5.0, 5.0, 15.0, 25.0])
+        theta = 0.0366
+        multiplier = decomposition_multiplier(t_air, theta)
+
+        assert multiplier == pytest.approx(float(np.mean(np.exp(theta * t_air))))
+        assert multiplier > float(np.exp(theta * t_air.mean()))
+
+    def test_a_constant_series_collapses_to_the_naive_form(self):
+        """With no variance there is no Jensen gap; the two forms must agree."""
+        t_air = np.full(50, 7.5)
+        assert decomposition_multiplier(t_air, 0.0366) == pytest.approx(
+            float(np.exp(0.0366 * 7.5))
+        )
+
+    def test_the_reference_temperature_gives_a_multiplier_of_one(self):
+        """rh_ref is defined at 0 degC precisely because exp(Theta*0) == 1."""
+        assert decomposition_multiplier(
+            np.zeros(10), 0.0366
+        ) == pytest.approx(1.0)
+
+    @pytest.mark.parametrize(
+        "series", [np.array([]), np.array([1.0, np.nan]), np.array([np.inf])]
+    )
+    def test_it_refuses_an_unusable_driver_series(self, series):
+        with pytest.raises(ValueError):
+            decomposition_multiplier(series)
+
+
+class TestResidenceTimeBounds:
+    def test_the_mapping_is_order_reversing(self):
+        """theta = 1/(tau*365.25): the long residence time is the LOW rate.
+
+        Getting this backwards would silently swap the bounds and put the prior
+        on turnover an order of magnitude too fast.
+        """
+        lower, upper = turnover_bounds_from_residence_time((20.0, 100.0))
+        assert lower < upper
+        assert lower == pytest.approx(1.0 / (100.0 * DAYS_PER_YEAR))
+        assert upper == pytest.approx(1.0 / (20.0 * DAYS_PER_YEAR))
+
+    def test_round_tripping_a_rate_recovers_its_residence_time(self):
+        lower, upper = turnover_bounds_from_residence_time((1.0, 5.0))
+        assert 1.0 / (upper * DAYS_PER_YEAR) == pytest.approx(1.0)
+        assert 1.0 / (lower * DAYS_PER_YEAR) == pytest.approx(5.0)
+
+    def test_it_refuses_unordered_or_non_positive_ranges(self):
+        for bad in ((5.0, 1.0), (0.0, 10.0), (-1.0, 5.0)):
+            with pytest.raises(ValueError):
+                turnover_bounds_from_residence_time(bad)
+
+
+class TestReferenceRespirationBounds:
+    def test_the_bounds_invert_the_steady_state_mass_balance(self):
+        """rh_ref * M * 365.25 must return the annual litter input.
+
+        This is the identity the whole prior rests on, so it is asserted
+        directly rather than through the numbers it happens to produce.
+        """
+        t_air = np.linspace(-15.0, 20.0, 400)
+        low_in, _central, high_in = ANNUAL_LITTER_INPUT_G_C_M2
+        multiplier = decomposition_multiplier(t_air)
+        lower, upper = reference_respiration_bounds(t_air)
+
+        assert lower * multiplier * DAYS_PER_YEAR == pytest.approx(low_in)
+        assert upper * multiplier * DAYS_PER_YEAR == pytest.approx(high_in)
+
+    def test_a_warmer_record_needs_a_smaller_reference_rate(self):
+        """Same annual total, more decomposition-days, lower rate at 0 degC."""
+        cold = reference_respiration_bounds(np.full(365, 0.0))
+        warm = reference_respiration_bounds(np.full(365, 10.0))
+        assert warm[0] < cold[0]
+        assert warm[1] < cold[1]
+
+
+class TestDeriveLitterSomPools:
+    def test_the_derived_stocks_respire_exactly_rh_ref_at_the_reference(self):
+        """The defining property: theta_lit*c_lit + theta_som*c_som == rh_ref."""
+        rh_ref, f_som = 0.6179, 0.7
+        theta_lit, theta_som = 1.5e-3, 6.0e-5
+        c_lit, c_som = derive_litter_som_pools(rh_ref, f_som, theta_lit, theta_som)
+
+        assert float(theta_lit * c_lit + theta_som * c_som) == pytest.approx(rh_ref)
+
+    def test_f_som_partitions_the_flux_as_advertised(self):
+        rh_ref, f_som = 0.6, 0.75
+        c_lit, c_som = derive_litter_som_pools(rh_ref, f_som, 1e-3, 5e-5)
+        assert float(1e-3 * c_lit) == pytest.approx((1.0 - f_som) * rh_ref)
+        assert float(5e-5 * c_som) == pytest.approx(f_som * rh_ref)
+
+    def test_it_broadcasts_over_draws(self):
+        n = 32
+        rng = np.random.default_rng(0)
+        rh = rng.uniform(0.5, 0.73, n)
+        fs = rng.uniform(0.5, 0.9, n)
+        tl = rng.uniform(5.5e-4, 2.7e-3, n)
+        ts = rng.uniform(2.7e-5, 1.4e-4, n)
+        c_lit, c_som = derive_litter_som_pools(rh, fs, tl, ts)
+
+        assert c_lit.shape == (n,)
+        assert np.allclose(tl * c_lit + ts * c_som, rh)
+
+    def test_it_refuses_a_share_outside_the_unit_interval(self):
+        for bad in (-0.1, 1.1):
+            with pytest.raises(ValueError):
+                derive_litter_som_pools(0.6, bad, 1e-3, 5e-5)
+
+    def test_it_refuses_a_non_positive_rate(self):
+        with pytest.raises(ValueError):
+            derive_litter_som_pools(0.6, 0.7, 0.0, 5e-5)
+
+
+class TestSampleReparameterisedParameters:
+    @pytest.fixture
+    def t_air(self):
+        rng = np.random.default_rng(7)
+        doy = np.arange(2000)
+        return 4.3 + 12.0 * np.sin(2 * np.pi * doy / 365.25) + rng.normal(0, 2.0, 2000)
+
+    def test_every_draw_respires_rh_ref_at_the_reference_temperature(self, t_air):
+        """The invariant that makes this prior worth having.
+
+        Under the superseded prior this quantity ran to 212 g C m-2 d-1. Here it
+        cannot leave the rh_ref bounds, and that is asserted on every draw
+        rather than on a summary statistic.
+        """
+        _, frame = sample_reparameterised_parameters(
+            256, rng=np.random.default_rng(1), t_air=t_air
+        )
+        rh = frame["theta_lit"] * frame["c_lit_0"] + frame["theta_som"] * frame["c_som_0"]
+        assert np.allclose(rh, frame["rh_ref"])
+
+        lower, upper = reference_respiration_bounds(t_air)
+        assert rh.min() >= lower - 1e-12
+        assert rh.max() <= upper + 1e-12
+
+    def test_it_keeps_soil_respiration_off_the_impossible_scale(self, t_air):
+        """Task 1's failure mode, stated as a regression test.
+
+        The superseded prior's median Rh at T=0 was 42 g C m-2 d-1 against a
+        site whose whole net exchange is about 0.6. Anything above 1 here means
+        the derivation has been broken.
+        """
+        _, frame = sample_reparameterised_parameters(
+            512, rng=np.random.default_rng(2), t_air=t_air
+        )
+        rh = frame["theta_lit"] * frame["c_lit_0"] + frame["theta_som"] * frame["c_som_0"]
+        assert rh.max() < 1.0
+
+    def test_the_derived_pools_are_not_drawn_from_the_registry_bounds(self, t_air):
+        """c_lit_0 and c_som_0 are outputs now; they must not be sampled.
+
+        A uniform draw over the registry's c_som_0 range would put the median
+        near 100,000. Asserting the median is far below that catches a
+        regression to independent sampling.
+        """
+        _, frame = sample_reparameterised_parameters(
+            2048, rng=np.random.default_rng(3), t_air=t_air
+        )
+        registry_lower, registry_upper = prior_bounds("c_som_0")
+        assert frame["c_som_0"].median() < 0.25 * registry_upper
+        assert frame["c_som_0"].min() > registry_lower
+
+    def test_sampled_respiration_parameters_stay_inside_their_new_bounds(self, t_air):
+        bounds = reparameterised_bounds(t_air)
+        _, frame = sample_reparameterised_parameters(
+            512, rng=np.random.default_rng(4), t_air=t_air
+        )
+        for name, (lower, upper) in bounds.items():
+            assert frame[name].min() >= lower
+            assert frame[name].max() <= upper
+
+    def test_the_untouched_parameters_keep_their_published_priors(self, t_air):
+        """Only the four respiration parameters move; nothing else may drift."""
+        _, frame = sample_reparameterised_parameters(
+            4096, rng=np.random.default_rng(5), t_air=t_air
+        )
+        for name in ("ceff", "lma", "theta_woo", "temperature_exponent", "cr_onset"):
+            lower, upper = prior_bounds(name)
+            assert frame[name].min() >= lower
+            assert frame[name].max() <= upper
+            # and it is actually spread over the range, not pinned
+            assert frame[name].max() - frame[name].min() > 0.5 * (upper - lower)
+
+    def test_allocation_still_closes(self, t_air):
+        params, _ = sample_reparameterised_parameters(
+            128, rng=np.random.default_rng(6), t_air=t_air
+        )
+        for parameters in params:
+            total = (
+                parameters.f_auto
+                + parameters.f_lab
+                + parameters.f_fol
+                + parameters.f_roo
+                + parameters.f_woo
+            )
+            assert total == pytest.approx(1.0)
+
+    def test_it_is_reproducible_from_the_seed(self, t_air):
+        _, first = sample_reparameterised_parameters(
+            64, rng=np.random.default_rng(11), t_air=t_air
+        )
+        _, second = sample_reparameterised_parameters(
+            64, rng=np.random.default_rng(11), t_air=t_air
+        )
+        pd.testing.assert_frame_equal(first, second)
+
+    def test_the_frame_carries_what_was_sampled_and_what_was_derived(self, t_air):
+        """A failed draw must be traceable to the quantity actually sampled."""
+        _, frame = sample_reparameterised_parameters(
+            16, rng=np.random.default_rng(12), t_air=t_air
+        )
+        for name in (*REPARAMETERISED_SAMPLED, *REPARAMETERISED_DERIVED):
+            assert name in frame.columns

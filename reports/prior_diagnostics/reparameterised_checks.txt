@@ -1,0 +1,77 @@
+==========================================================================
+  Reparameterised heterotrophic respiration -- three checks
+==========================================================================
+  calibration block  1997-2010, 5113 days, 4413 assimilable
+  draws              1000
+  master seed        20260809
+
+==========================================================================
+  Construction of the rh_ref prior
+==========================================================================
+  annual litter input      280 g C m-2 yr-1  (range 225-332)
+  mean TA_F                4.324 degC (sd 9.421)
+  M = mean(exp(0.0366 T))  1.2406   <- from the drivers
+  exp(0.0366 mean T)       1.1715   <- NOT used, -5.6% (Jensen)
+  rh_ref = input / (M * 365.25)
+  residence times          litter 1-5 yr, SOM 20-100 yr
+    rh_ref     U(0.496565, 0.732709)
+    f_som      U(0.5, 0.9)
+    theta_lit  U(0.00054757, 0.00273785)
+    theta_som  U(2.73785e-05, 0.000136893)
+
+==========================================================================
+  CHECK 1 -- derived c_som_0 against the 5,000-10,000 g C m-2 inventory
+==========================================================================
+  c_som_0   min    1,851   2.5%    2,572   median    5,257   97.5%   15,276   max   23,923
+            IQR 3,880 to 7,870
+  c_lit_0   min       19   2.5%       32   median      111   97.5%      379   max      659
+            IQR 73 to 170
+
+  prior mass inside the inventory range   39.6%
+  below 5,000: 46.2%     above 10,000: 14.3%
+
+  superseded independent-uniform prior, for contrast:
+    median 99,468   inside the range 2.5%
+  Rh at T=0, reparameterised  median     0.61   max       0.73  g C m-2 d-1
+  Rh at T=0, superseded       median    42.39   max     211.89  g C m-2 d-1
+
+==========================================================================
+  CHECK 2 -- failure rate and coverage
+==========================================================================
+  running 1000 forward integrations...
+      100 / 1000   failed so far: 1
+      200 / 1000   failed so far: 4
+      300 / 1000   failed so far: 10
+      400 / 1000   failed so far: 10
+      500 / 1000   failed so far: 13
+      600 / 1000   failed so far: 14
+      700 / 1000   failed so far: 17
+      800 / 1000   failed so far: 20
+      900 / 1000   failed so far: 26
+     1000 / 1000   failed so far: 29
+
+    usable                     971    97.1%
+    |NEE| >30                   26     2.6%
+    pool growth >100x            3     0.3%
+
+  failure rate   29 / 1000 = 2.9%
+  Task 1 was     83.7%
+  change         -80.8 points
+
+  coverage       0.724
+  Task 1 was     0.651
+  change         +0.073   (target ~0.90)
+
+==========================================================================
+  CHECK 3 -- prior predictive median annual NEE
+==========================================================================
+  prior predictive median      +543.8 g C m-2 yr-1
+  IQR                           -69.4 to +1193.9
+  5-95%                        -789.3 to +2099.5
+
+  observed, assimilable days in block      -215.8
+  quoted target                             -206.0
+  difference, median - observed             +759.5
+  observed inside the prior 5-95%?       yes
+
+  draws -> reports\prior_diagnostics\reparameterised_draws.csv

@@ -50,19 +50,30 @@ from scipy.optimize import brentq
 __all__ = [
     "ALLOCATION_PARAMETERS",
     "ALLOCATION_WEIGHT_ORDER",
+    "ANNUAL_LITTER_INPUT_G_C_M2",
+    "DAYS_PER_YEAR",
+    "EMPIRICAL_TEMPERATURE_EXPONENT",
+    "F_SOM_BOUNDS",
+    "LITTER_RESIDENCE_TIME_YEARS",
     "PARAMETER_NAMES",
     "PARAMETER_REGISTRY",
     "PHENOLOGY_PARAMETERS",
     "PHOTOSYNTHESIS_PARAMETERS",
     "POOL_STATE_PARAMETERS",
+    "RESPIRATION_REFERENCE_TEMPERATURE_C",
     "SIMPLEX_PARAMETERS",
+    "SOM_RESIDENCE_TIME_YEARS",
     "TURNOVER_PARAMETERS",
     "DalecParameters",
     "Parameter",
     "allocation_fractions",
+    "decomposition_multiplier",
+    "derive_litter_som_pools",
     "phenology_psi_f",
     "prior_bounds",
+    "reference_respiration_bounds",
     "solve_psi",
+    "turnover_bounds_from_residence_time",
 ]
 
 #: Tolerance on the allocation closure f_auto + f_lab + f_fol + f_roo + f_woo = 1.
@@ -505,3 +516,177 @@ def phenology_psi_f(c_lf: float, cr_fall: float) -> float:
     if not math.isfinite(psi_f):
         raise ValueError(f"psi_f is not finite for c_lf={c_lf!r}, cr_fall={cr_fall!r}")
     return psi_f
+
+
+# ---------------------------------------------------------------------------
+# Heterotrophic respiration, reparameterised
+# ---------------------------------------------------------------------------
+#
+# Why this exists
+# ---------------
+# Tasks 1 and 2 both isolated the same failure. Sampling ``theta_som`` and
+# ``c_som_0`` independently over their Bloom & Williams ranges puts most of the
+# prior mass on a *product* -- the soil respiration flux -- that is physically
+# impossible. The prior median produces 50 g C m-2 d-1 of soil respiration
+# against a site whose entire net exchange is around 0.6, 837 of 1000 draws
+# failed the screen, and the two parameters ranked first and second in the OAAT
+# sensitivity while being individually meaningless.
+#
+# The fix is to sample the flux and the partition, and derive the stocks:
+#
+#     sampled    rh_ref, f_som, theta_lit, theta_som
+#     derived    c_lit_0 = (1 - f_som) * rh_ref / theta_lit
+#                c_som_0 =      f_som  * rh_ref / theta_som
+#
+# ``rh_ref`` is total heterotrophic respiration at the reference temperature,
+# which is **0 degrees C**, because the DALEC A5/A6 multiplier is
+# ``exp(Theta * T)`` and that equals one at T = 0. ``f_som`` is the SOM share of
+# it. The derived pools are exactly the stocks that produce ``rh_ref`` at steady
+# state, so a draw cannot place 10^5 g C m-2 of soil behind a fast turnover rate.
+#
+# This is a genuine prior change and it supersedes the bounded-uniform priors on
+# ``c_lit_0`` and ``c_som_0``. See DECISIONS.md section 7.
+
+#: Reference temperature for ``rh_ref``, degrees C. Not a free choice: the
+#: decomposition multiplier ``exp(Theta * T)`` is one here by construction.
+RESPIRATION_REFERENCE_TEMPERATURE_C: Final[float] = 0.0
+
+#: Annual litter input to the soil at FI-Hyy, g C m-2 yr-1, as (low, central,
+#: high). Ilvesniemi et al. (2009) mass balance. At long-run steady state the
+#: whole input decomposes, so this is also the annual heterotrophic respiration.
+ANNUAL_LITTER_INPUT_G_C_M2: Final[tuple[float, float, float]] = (225.0, 280.0, 332.0)
+
+#: Empirical temperature sensitivity used to convert the annual flux to a daily
+#: reference rate, degC-1. Measured from the FI-Hyy winter flux record itself
+#: (EDA_NOTES.md, eda05), not taken from the prior.
+EMPIRICAL_TEMPERATURE_EXPONENT: Final[float] = 0.0366
+
+#: Residence times against the respiratory pathway, years, as (low, high).
+#:
+#: **Definition matters here.** ``tau = 1 / theta``, the e-folding time against
+#: *respiratory loss alone*. The litter pool's total residence time is shorter
+#: than ``tau_lit`` because ``theta_min`` also drains it to SOM, and that
+#: transfer is not a respiratory loss. Reading a published *pool* turnover time
+#: straight into ``theta_lit`` would attribute the mineralisation flux to
+#: respiration and understate the litter stock.
+LITTER_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (1.0, 5.0)
+SOM_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (20.0, 100.0)
+
+#: SOM share of total heterotrophic respiration, dimensionless, as (low, high).
+#: Boreal heterotrophic respiration is dominated by the humus and mineral soil
+#: rather than by fresh litter, but not overwhelmingly so.
+F_SOM_BOUNDS: Final[tuple[float, float]] = (0.5, 0.9)
+
+#: Days per year used for every annual-to-daily conversion here.
+DAYS_PER_YEAR: Final[float] = 365.25
+
+
+def decomposition_multiplier(
+    t_air: np.ndarray, temperature_exponent: float = EMPIRICAL_TEMPERATURE_EXPONENT
+) -> float:
+    """Mean of ``exp(Theta * T)`` over a driver series.
+
+    This is ``mean(exp(Theta * T))`` and **not** ``exp(Theta * mean(T))``. The
+    two differ by Jensen's inequality -- ``exp`` is convex, so the mean of the
+    multiplier exceeds the multiplier of the mean whenever temperature varies.
+    At FI-Hyy the daily air temperature has a standard deviation of about 9.4
+    degrees C and the gap is roughly 6%. Using the naive form would inflate
+    ``rh_ref`` by that much and quietly bias every derived carbon stock.
+
+    Parameters
+    ----------
+    t_air
+        Daily mean air temperature over the record, degrees C.
+    temperature_exponent
+        Theta in A5/A6, degC-1.
+
+    Returns
+    -------
+    The dimensionless mean multiplier, > 1 for any varying series with mean
+    above the reference temperature.
+    """
+    values = np.asarray(t_air, dtype=float)
+    if values.size == 0:
+        raise ValueError("cannot take a temperature multiplier over an empty series")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("driver temperature series contains non-finite values")
+    return float(np.mean(np.exp(float(temperature_exponent) * values)))
+
+
+def reference_respiration_bounds(
+    t_air: np.ndarray,
+    *,
+    temperature_exponent: float = EMPIRICAL_TEMPERATURE_EXPONENT,
+    annual_input: tuple[float, float, float] = ANNUAL_LITTER_INPUT_G_C_M2,
+) -> tuple[float, float]:
+    """Prior bounds on ``rh_ref``, g C m-2 d-1 at the reference temperature.
+
+    At long-run steady state the annual heterotrophic respiration equals the
+    annual litter input. Over a year,
+
+        annual_input = rh_ref * sum(exp(Theta * T)) = rh_ref * M * DAYS_PER_YEAR
+
+    with ``M`` the mean multiplier, so ``rh_ref = annual_input / (M * 365.25)``.
+
+    Parameters
+    ----------
+    t_air
+        Daily mean air temperature over the record, degrees C. The multiplier is
+        computed from the actual drivers rather than assumed.
+    temperature_exponent
+        Theta used for the conversion.
+    annual_input
+        ``(low, central, high)`` annual litter input, g C m-2 yr-1. The central
+        value sets no bound; it is carried so callers can report it.
+
+    Returns
+    -------
+    ``(lower, upper)`` bounds for a uniform prior on ``rh_ref``.
+    """
+    low, _central, high = annual_input
+    if not 0.0 < low <= high:
+        raise ValueError(f"annual litter input bounds are not ordered: {annual_input!r}")
+    multiplier = decomposition_multiplier(t_air, temperature_exponent)
+    scale = multiplier * DAYS_PER_YEAR
+    return low / scale, high / scale
+
+
+def turnover_bounds_from_residence_time(
+    residence_time_years: tuple[float, float],
+) -> tuple[float, float]:
+    """Convert a ``(low, high)`` residence time in years to rate bounds in d-1.
+
+    The mapping ``theta = 1 / (tau * 365.25)`` is order-reversing, so the long
+    residence time gives the lower rate.
+    """
+    low, high = residence_time_years
+    if not 0.0 < low <= high:
+        raise ValueError(f"residence times are not ordered: {residence_time_years!r}")
+    return 1.0 / (high * DAYS_PER_YEAR), 1.0 / (low * DAYS_PER_YEAR)
+
+
+def derive_litter_som_pools(
+    rh_ref: np.ndarray | float,
+    f_som: np.ndarray | float,
+    theta_lit: np.ndarray | float,
+    theta_som: np.ndarray | float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Steady-state litter and SOM stocks implied by a respiration draw.
+
+    ``c_lit_0 = (1 - f_som) * rh_ref / theta_lit`` and
+    ``c_som_0 = f_som * rh_ref / theta_som``: the stocks whose respiration at the
+    reference temperature sums to ``rh_ref``, split by ``f_som``.
+
+    Returns
+    -------
+    ``(c_lit_0, c_som_0)`` in g C m-2, broadcast to the inputs' shape.
+    """
+    rh = np.asarray(rh_ref, dtype=float)
+    share = np.asarray(f_som, dtype=float)
+    lit_rate = np.asarray(theta_lit, dtype=float)
+    som_rate = np.asarray(theta_som, dtype=float)
+    if np.any(share < 0.0) or np.any(share > 1.0):
+        raise ValueError("f_som must lie in [0, 1]")
+    if np.any(lit_rate <= 0.0) or np.any(som_rate <= 0.0):
+        raise ValueError("turnover rates must be strictly positive")
+    return (1.0 - share) * rh / lit_rate, share * rh / som_rate

@@ -482,6 +482,17 @@ Flagged here so they cannot quietly become fact:
 - `lma = 110` g C m⁻² is Chuter's Loobos reference value, used as a working value
   in the gate re-run. It is a sampled parameter, not a constant, and the Loobos
   figure is not a FI-Hyy measurement.
+- **The two residence-time ranges behind the reparameterised respiration prior**
+  carry no citation at all: τ_lit = 1–5 yr and τ_som = 20–100 yr were chosen as
+  round, defensible boreal spans. They set `theta_lit` and `theta_som`, and through
+  the steady-state derivation they set `c_lit_0` and `c_som_0` too, so they are the
+  single most load-bearing unsourced numbers in the project. See §7.
+- `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
+  judgement about boreal soils, not a measurement.
+- The annual litter input 280 (225–332) g C m⁻² yr⁻¹ attributed to Ilvesniemi et
+  al. (2009), and the 5,000–10,000 g C m⁻² soil inventory range it is checked
+  against, were supplied rather than read. **Neither has been verified against the
+  full paper**, which the standing project rule requires before either is cited.
 - `ACM_CALIBRATION_BOUNDS` currently holds only the `t_mean` row (7–30 °C). The
   remaining Williams et al. Table 1 rows — irradiance, LAI, CO₂ and the rest —
   have not been supplied, so `calibration_bound_coverage()` reports on
@@ -491,6 +502,248 @@ Removed, and deliberately: `site.canopy_height_m` and `site.psi_d_mpa`. Both wer
 required only by the Williams et al. (1997) form. Canopy height does not appear
 in the DALEC conductance equation, and the water potential is a coefficient of
 the site-calibrated parameter set rather than a config value.
+
+---
+
+## 7. Heterotrophic respiration is reparameterised — site-informed prior
+
+**Decided 2026-08-28. This supersedes the bounded-uniform priors on `c_lit_0`,
+`c_som_0`, `theta_lit` and `theta_som` in §1.** Everything else in §1 stands: the
+remaining 19 parameters keep their published uniform ranges, the allocation
+fractions keep the Dirichlet simplex, and there is still no EDC accept/reject.
+
+### The problem this fixes
+
+Tasks 1 and 2 independently isolated the same defect. Sampling `theta_som` and
+`c_som_0` as independent uniforms places the prior on two stocks whose *product*
+is a flux, and does not constrain that flux at all:
+
+| | superseded prior | reparameterised |
+|---|---:|---:|
+| median Rh at T = 0, g C m⁻² d⁻¹ | 42.4 | 0.61 |
+| maximum Rh at T = 0 | 211.9 | 0.73 |
+| median `c_som_0`, g C m⁻² | 99,468 | 5,257 |
+
+The site's entire net exchange is about 0.6 g C m⁻² d⁻¹. A prior whose median
+soil respiration is 42 is not weakly informative, it is wrong, and it is what
+drove Task 1's 83.7% failure rate.
+
+### The design
+
+Sampled:
+
+| parameter | prior | source |
+|---|---|---|
+| `rh_ref` | U(0.4966, 0.7327) g C m⁻² d⁻¹ | Ilvesniemi mass balance, converted below |
+| `f_som` | U(0.5, 0.9), dimensionless | SOM share of Rh, see below |
+| `theta_lit` | U(5.476×10⁻⁴, 2.738×10⁻³) d⁻¹ | τ_lit = 1–5 yr |
+| `theta_som` | U(2.738×10⁻⁵, 1.369×10⁻⁴) d⁻¹ | τ_som = 20–100 yr |
+
+Derived, not sampled:
+
+```
+c_lit_0 = (1 - f_som) * rh_ref / theta_lit
+c_som_0 =      f_som  * rh_ref / theta_som
+```
+
+These are the stocks that produce `rh_ref` at steady state. A draw can no longer
+put 10⁵ g C m⁻² of soil carbon behind a fast turnover rate, because the stock is
+whatever the sampled flux and rate imply.
+
+**`rh_ref` is defined at a reference temperature of 0 °C.** That is not a free
+choice: the A5/A6 multiplier is `exp(Θ·T)`, which is one at T = 0.
+
+### The annual-to-daily conversion
+
+At long-run steady state the annual heterotrophic respiration equals the annual
+litter input, so over a year
+
+```
+annual_input = rh_ref * Σ exp(Θ·T) = rh_ref * M * 365.25
+```
+
+with `M` the **mean of the multiplier over the actual driver series**:
+
+| quantity | value |
+|---|---:|
+| mean `TA_F`, calibration block | 4.324 °C (sd 9.421) |
+| `M = mean(exp(0.0366·T))` — used | **1.2406** |
+| `exp(0.0366 · mean T)` — *not* used | 1.1715 |
+| Jensen gap | 5.6% |
+
+**The naive form is wrong and the error is one-directional.** `exp` is convex, so
+the mean of the multiplier always exceeds the multiplier of the mean when
+temperature varies. Using `exp(Θ·mean T)` would have inflated `rh_ref` by 5.6%
+and, through the derivation above, every stock derived from it. Θ = 0.0366 °C⁻¹
+is the value measured from the FI-Hyy winter flux record itself (`EDA_NOTES.md`,
+eda05), not a value taken from the prior.
+
+Implemented in `dalec.parameters.decomposition_multiplier` and
+`reference_respiration_bounds`; the multiplier is computed from the drivers at
+run time rather than hard-coded, so it cannot silently go stale if the block
+changes.
+
+### Known inconsistency, recorded not hidden
+
+`rh_ref`'s prior is built at the empirical Θ = 0.0366, but `temperature_exponent`
+is *itself sampled* over U(0.018, 0.08). A draw at Θ = 0.08 respires more over
+the year than its `rh_ref` was calibrated to deliver, and a draw at Θ = 0.018
+less. The steady-state mass balance therefore holds exactly only for draws near
+Θ ≈ 0.0366.
+
+This follows the specified construction and is left as specified. The alternative
+— recomputing `M` per draw from that draw's own Θ — would make the mass balance
+hold for every draw, and is the obvious next refinement if the prior predictive
+still shows an annual-total bias.
+
+### Citation status — READ THIS BEFORE CITING ANY OF IT
+
+| input | value | status |
+|---|---|---|
+| annual litter input | 280 (225–332) g C m⁻² yr⁻¹ | **supplied, not verified against the paper** |
+| soil inventory target | 5,000–10,000 g C m⁻² | **supplied, not verified** |
+| τ_lit | 1–5 yr | **not sourced — chosen as a defensible boreal span** |
+| τ_som | 20–100 yr | **not sourced — chosen as a defensible boreal span** |
+| Θ = 0.0366 °C⁻¹ | | measured in this project, eda05 |
+| M = 1.2406 | | computed in this project from `TA_F` |
+
+The two residence-time ranges are **the weakest link in this prior and they carry
+no citation**. They were chosen as round, defensible boreal values, and the
+standing project rule — verify every citation against the full paper before using
+it — has *not* been satisfied for them. See §6.
+
+**Consequently CHECK 1 is a consistency check, not independent corroboration.**
+The derived `c_som_0` lands in the published inventory range partly because
+τ_som was chosen at a plausible boreal magnitude, and the agreement is sensitive
+to that choice:
+
+| τ_som range (yr) | median `c_som_0` | share inside 5,000–10,000 |
+|---|---:|---:|
+| 10–50 | 2,618 | 14.1% |
+| 15–75 | 3,925 | 28.6% |
+| **20–100 (adopted)** | **5,240** | **39.4%** |
+| 25–80 | 5,992 | 55.3% |
+| 30–150 | 7,879 | 52.0% |
+| 50–200 | 12,581 | 29.5% |
+
+(Sensitivity table from an independent 200,000-draw sample, which is why the
+adopted row reads 5,240 against the 5,257 quoted above; the difference is
+sampling noise, not a discrepancy.)
+
+The result is not circular — τ_som was not tuned to maximise the last column, and
+25–80 would have scored better — but it is not an independent test either, and
+must not be written up as one.
+
+### The residence-time definition
+
+`τ = 1/θ` is the e-folding time **against the respiratory pathway alone**. The
+litter pool's total residence time is shorter than τ_lit, because `theta_min`
+also drains it to SOM and that transfer is not a respiratory loss. Reading a
+published *pool* turnover time straight into `theta_lit` would attribute the
+mineralisation flux to respiration and understate the litter stock. Anyone
+replacing these ranges with sourced values must check which quantity the source
+reports.
+
+### `f_som`
+
+U(0.5, 0.9). Boreal heterotrophic respiration is dominated by humus and mineral
+soil rather than by fresh litter, but not overwhelmingly so. This range is a
+judgement, not a measurement, and belongs in §6 with the residence times.
+
+### The three acceptance checks — results, 2026-08-28
+
+Run by `scripts/10_reparameterised_prior.py`, 1000 draws, seed 20260809, block
+1997–2010. Full output in `reports/prior_diagnostics/reparameterised_checks.txt`.
+
+| check | result | against | verdict |
+|---|---:|---:|---|
+| 1. derived `c_som_0` in 5,000–10,000 g C m⁻² | median 5,257, 39.6% inside | superseded median 99,468, 2.5% inside | **pass, with the caveat above** |
+| 2a. prior draw failure rate | **2.9%** | 83.7% | **pass** |
+| 2b. coverage of the 90% band | **0.724** | 0.651 | improved, still short of 0.90 |
+| 3. prior predictive median annual NEE | **+543.8** | observed −215.8 | **fail — wrong sign** |
+
+Checks 1 and 2 are about heterotrophic respiration and both moved sharply the
+right way. Rh at T = 0 is now bounded by construction at 0.50–0.73 g C m⁻² d⁻¹
+where the superseded prior reached 211.89.
+
+### Why check 3 fails, and it is not the respiration prior
+
+Attribution in `reports/prior_diagnostics/check3_attribution.txt`, 250 draws.
+
+**Not the Θ inconsistency.** The obvious suspect was the mismatch recorded above
+— `rh_ref` built at Θ = 0.0366 while `temperature_exponent` samples U(0.018,
+0.08). Quantified, it inflates median annual Rh from 280 to **299.8**, +19.8
+(1.07×), with a Spearman correlation against annual NEE of only 0.203. It cannot
+account for a discrepancy of +759, and the refinement suggested above would not
+fix check 3.
+
+**The cause is GPP.** Annual totals, modelled median against observed:
+
+| flux | modelled median | observed | ratio |
+|---|---:|---:|---:|
+| GPP | 2,515 | 1,103 (`gpp_nt` 1090, `gpp_dt` 1116) | **2.3×** |
+| Ra + Rh | 2,307 | 886 (`reco_nt` 887, `reco_dt` 885) | **2.6×** |
+| NEE | +347 to +544 | −215.8 | wrong sign |
+
+Both gross fluxes are roughly 2.4× too large and NEE is their small difference,
+so a modest proportional error in either produces a large, wrong-signed net. The
+`ceff` prior U(10, 100) is the immediate suspect: the GPP magnitude gate passed
+at `ceff` ≈ 11.7, near the very bottom of that range, and Task 2's one-at-a-time
+optimum was ≈ 30. The prior median near 55 is far above both.
+
+**This is outside the reparameterisation.** `c_lit_0` and `c_som_0` no longer
+carry the error; GPP does. Fixing it means revisiting the `ceff` prior, which is
+a separate decision and is not taken here.
+
+### The steady-state premise is contradicted by the data
+
+Recorded because it undercuts the derivation in principle, whatever happens to
+`ceff`.
+
+`rh_ref` is built on "annual litter input, all of which decomposes at long-run
+steady state", so annual Rh = annual litter input = 280. **FI-Hyy is not at
+steady state.** It is a measured sink of 217 g C m⁻² yr⁻¹ over the calibration
+block (`Reco` − `GPP` = 886 − 1103 = −217, matching the observed NEE of −215.8 to
+1.2 g). At a sink, litter input necessarily *exceeds* Rh, by exactly the
+accumulation:
+
+| `f_auto` | Ra | implied Rh | litter input | accumulating |
+|---:|---:|---:|---:|---:|
+| 0.3 | 331 | 555 | 772 | 217 |
+| 0.4 | 441 | 445 | 662 | 217 |
+| 0.5 | 552 | 335 | 552 | 217 |
+| 0.6 | 662 | 224 | 441 | 217 |
+| 0.7 | 772 | 114 | 331 | 217 |
+
+Equating the two therefore overstates Rh, or understates litter input, by about
+217 g C m⁻² yr⁻¹ — comparable to the 280 itself.
+
+Two consequences worth stating plainly:
+
+1. **Which quantity is 280?** The derivation uses it as Rh. Read as Rh it is
+   consistent with the site's own partitioning near `f_auto` ≈ 0.55, which is
+   inside the prior. Read as *litter input* — which is what the source is said
+   to report — the corresponding Rh is 280 − 217 ≈ 63, and `rh_ref` would be
+   more than four times too high. **The two readings differ by a factor of 4.4
+   and the correct one is not yet established**, which is another reason the
+   Ilvesniemi figure must be checked against the paper before use (§6).
+2. The partitioned products could supply this directly. `reco_nt`/`reco_dt` are
+   already loaded, and Rh = `Reco` − `f_auto`·GPP is a per-draw quantity needing
+   no literature value at all. It is model output rather than observation (§1)
+   and so cannot enter the likelihood, but it can inform a prior. Not adopted
+   here; recorded as the obvious alternative.
+
+### Where it lives
+
+`dalec.parameters` holds the constants and the four conversion functions;
+`dalec.diagnostics.sample_reparameterised_parameters` draws from them.
+`scripts/10_reparameterised_prior.py` runs the three acceptance checks and
+reports, and changes nothing.
+
+The superseded path is retained and still tested:
+`dalec.diagnostics.sample_prior_parameters` continues to draw the published
+priors, because Tasks 1 and 2 are stated against it and their numbers must stay
+reproducible.
 
 ---
 

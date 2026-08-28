@@ -84,9 +84,15 @@ from dalec.model_numpy import (
 )
 from dalec.parameters import (
     ALLOCATION_WEIGHT_ORDER,
+    F_SOM_BOUNDS,
+    LITTER_RESIDENCE_TIME_YEARS,
     PARAMETER_REGISTRY,
+    SOM_RESIDENCE_TIME_YEARS,
     DalecParameters,
+    derive_litter_som_pools,
     prior_bounds,
+    reference_respiration_bounds,
+    turnover_bounds_from_residence_time,
 )
 
 __all__ = [
@@ -94,6 +100,8 @@ __all__ = [
     "FAILURE_GROWTH_FACTOR",
     "FAILURE_NEE_LIMIT",
     "HALFHOURS_PER_DAY",
+    "REPARAMETERISED_DERIVED",
+    "REPARAMETERISED_SAMPLED",
     "SWEEP_PERCENTILES",
     "SWEEP_POINTS",
     "GppMagnitudeGate",
@@ -113,7 +121,9 @@ __all__ = [
     "prior_sweep_values",
     "randunc_audit",
     "randunc_relationships",
+    "reparameterised_bounds",
     "sample_prior_parameters",
+    "sample_reparameterised_parameters",
     "seasonal_timing",
     "shoulder_season_gpp",
     "simplex_edge_weights",
@@ -1428,3 +1438,117 @@ def simplex_edge_weights(
         rows[row, target] = fraction
         rows[row, others] = share * (1.0 - fraction)
     return rows
+
+
+#: Parameters the reparameterisation replaces. ``theta_lit`` and ``theta_som``
+#: keep their names but take residence-time bounds instead of the Bloom &
+#: Williams ones; ``c_lit_0`` and ``c_som_0`` stop being sampled at all.
+REPARAMETERISED_SAMPLED: Final[tuple[str, ...]] = (
+    "rh_ref",
+    "f_som",
+    "theta_lit",
+    "theta_som",
+)
+REPARAMETERISED_DERIVED: Final[tuple[str, ...]] = ("c_lit_0", "c_som_0")
+
+
+def reparameterised_bounds(t_air: np.ndarray) -> dict[str, tuple[float, float]]:
+    """Prior bounds for the four sampled respiration parameters.
+
+    ``rh_ref`` depends on the driver series, so this needs the temperatures
+    rather than being a module constant. Everything else is fixed.
+    """
+    return {
+        "rh_ref": reference_respiration_bounds(t_air),
+        "f_som": F_SOM_BOUNDS,
+        "theta_lit": turnover_bounds_from_residence_time(LITTER_RESIDENCE_TIME_YEARS),
+        "theta_som": turnover_bounds_from_residence_time(SOM_RESIDENCE_TIME_YEARS),
+    }
+
+
+def sample_reparameterised_parameters(
+    n_draws: int, *, rng: np.random.Generator, t_air: np.ndarray
+) -> tuple[list[DalecParameters], pd.DataFrame]:
+    """Draw parameter sets with heterotrophic respiration reparameterised.
+
+    Identical to :func:`sample_prior_parameters` except for the four
+    respiration parameters. ``rh_ref`` and ``f_som`` are sampled and
+    ``c_lit_0`` and ``c_som_0`` are *derived* from them, so the prior is placed
+    on the respiration flux and its partition rather than on two stocks whose
+    product happens to be a flux. ``theta_lit`` and ``theta_som`` are still
+    sampled, but over residence-time bounds rather than the published ones.
+
+    See DECISIONS.md section 7 for the sources and the derivation.
+
+    Parameters
+    ----------
+    n_draws
+        Number of parameter sets.
+    rng
+        Seeded generator.
+    t_air
+        Daily mean air temperature over the record, degrees C. Sets the
+        ``rh_ref`` bounds through the mean decomposition multiplier.
+
+    Returns
+    -------
+    params
+        One :class:`DalecParameters` per draw.
+    frame
+        The draws as a table. Carries the sampled ``rh_ref`` and ``f_som``
+        alongside the derived ``c_lit_0`` and ``c_som_0``, so a failed draw can
+        be traced back to the quantity that was actually sampled.
+    """
+    simplex_names = [n for n, p in PARAMETER_REGISTRY.items() if p.simplex]
+    if tuple(simplex_names) != tuple(ALLOCATION_WEIGHT_ORDER):
+        raise ValueError(
+            f"registry simplex order {simplex_names} does not match "
+            f"ALLOCATION_WEIGHT_ORDER {ALLOCATION_WEIGHT_ORDER}; that ordering is "
+            "load-bearing and no conservation test would catch a permutation"
+        )
+    bounds = reparameterised_bounds(t_air)
+    replaced = set(REPARAMETERISED_SAMPLED) | set(REPARAMETERISED_DERIVED)
+    untouched = [
+        n
+        for n, p in PARAMETER_REGISTRY.items()
+        if not p.simplex and n not in replaced
+    ]
+
+    draws = {name: rng.uniform(*prior_bounds(name), size=n_draws) for name in untouched}
+    draws.update(
+        {name: rng.uniform(*bounds[name], size=n_draws) for name in REPARAMETERISED_SAMPLED}
+    )
+    c_lit_0, c_som_0 = derive_litter_som_pools(
+        draws["rh_ref"], draws["f_som"], draws["theta_lit"], draws["theta_som"]
+    )
+    draws["c_lit_0"] = c_lit_0
+    draws["c_som_0"] = c_som_0
+    weights = rng.dirichlet(np.ones(len(simplex_names)), size=n_draws)
+
+    scalar_names = [*untouched, *REPARAMETERISED_SAMPLED, *REPARAMETERISED_DERIVED]
+    model_names = [n for n in scalar_names if n in PARAMETER_REGISTRY]
+
+    params = []
+    for index in range(n_draws):
+        rest = {
+            name: float(draws[name][index]) for name in model_names if name != "f_auto"
+        }
+        params.append(
+            DalecParameters.from_allocation_simplex(
+                f_auto=float(draws["f_auto"][index]),
+                allocation_weights=weights[index],
+                **rest,
+            )
+        )
+
+    frame = pd.DataFrame(
+        {
+            **{name: draws[name] for name in scalar_names},
+            **{
+                name: np.array([getattr(p, name) for p in params])
+                for name in simplex_names
+            },
+        }
+    )
+    frame.insert(0, "draw", np.arange(n_draws))
+    return params, frame

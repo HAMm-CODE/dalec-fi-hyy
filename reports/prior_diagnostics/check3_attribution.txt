@@ -1,0 +1,31 @@
+==========================================================================
+  (a) The Theta inconsistency, quantified analytically
+==========================================================================
+  rh_ref was built so that annual Rh = 280 g C m-2 yr-1 AT Theta=0.0366.
+  Each draw then uses its OWN sampled Theta:
+    implied annual Rh   median   299.8   IQR 269.8 to 349.6   5-95% 228.7 to 420.2
+    intended                    280.0
+    median inflation            +19.8 g C m-2 yr-1  (1.07x)
+
+==========================================================================
+  (b) Annual flux decomposition, 241 usable of 250 draws
+==========================================================================
+  quantity        median      IQR
+  GPP             +2515.0     +379.7 to  +3127.8
+  Ra              +1035.4     +217.3 to  +1477.4
+  Rh (realised)   +1271.8     +832.4 to  +1874.6
+  NEE              +346.6     -196.4 to  +1024.2
+
+  observed NEE, assimilable-day basis   -215.8
+  observed NEE, all-day basis           -202.5
+
+==========================================================================
+  (c) Is the bias driven by Theta?
+==========================================================================
+  Spearman corr(Theta, annual NEE) = 0.203
+  draws with Theta in [0.030, 0.043] (n=69): median NEE +194.9
+  draws with Theta > 0.06            (n=66): median NEE +463.3
+  draws with Theta < 0.025           (n=28): median NEE +43.1
+
+  median GPP against the FLUXNET partitioned annual GPP (~1000-1100):
+    modelled median 2515.0
