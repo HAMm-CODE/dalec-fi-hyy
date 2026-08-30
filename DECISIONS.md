@@ -922,6 +922,14 @@ Realised in the sampler: foliar share median **0.144** against the measured
 
 ### What the canopy priors did to GPP, and what it proved
 
+> **Superseded by §9.** The 2.00× ACM productivity bias asserted at the end of
+> this subsection is **withdrawn**, along with the claim that the ACM bias was
+> "measured twice". It was measuring the DALEC2 `ceff` prior U(10, 100), and it
+> compared an annual-mean modelled LAI against a seasonal-maximum measured one.
+> The subsection is kept because the arithmetic in it is correct and the sequence
+> matters; the conclusion is not. Current position: §9 and
+> `reports/prior_diagnostics/FINDINGS_gpp.md`.
+
 Measured, not predicted: applying §8 made prior predictive GPP **worse**, from a
 median of 2,570 to **2,972** g C m⁻² yr⁻¹ against a measured 952–1104, with mean
 LAI rising from 5.09 to 7.49.
@@ -937,17 +945,18 @@ GPP of 1030 the new coefficient implies LAI **2.89**, against Kolari's measured
 pin is the ratio LAI/GPP; they cannot pin the level, because ACM sets GPP from
 LAI in the other direction.
 
-**That isolates the residual.** Among draws sitting at the measured leaf area
-(mean LAI 2.8–3.6) the median GPP is **2,056 against 1,030 — ACM is 2.00× too
-productive at the correct canopy.** With LIMITATIONS §1a's October/April ratio of
-0.290 against a measured 0.76, the ACM bias is now measured twice, in magnitude
-and in seasonal distribution.
+**That appeared to isolate a residual.** Among draws sitting at mean LAI 2.8–3.6
+the median GPP was 2,056 against 1,030, read at the time as ACM being 2.00× too
+productive at the correct canopy. ~~The ACM bias is measured twice, in magnitude
+and in seasonal distribution.~~ **Both readings are withdrawn (§9).** The band was
+not the correct canopy — it is a seasonal maximum, not an annual mean — and the
+`ceff` prior was DALEC2's, not REFLEX's. Only the seasonal defect survives.
 
 `ceff`'s correlation with GPP rose from +0.241 to +0.707 once the canopy was
 pinned, so the earlier claim that it is a weak lever was true of the old prior
-only. It still cannot reach the measured range: the lowest decile gives 1,898,
-1.85× too high. **Do not fit it** — that would bury a factor of two of structural
-error in a canopy-efficiency parameter.
+only. **Do not fit it to GPP** — that remains right, and for the original reason:
+a canopy-efficiency parameter tuned to a flux hides whatever structural error is
+actually present. Adopting REFLEX's published range instead is what §9 does.
 
 Full analysis in `reports/prior_diagnostics/FINDINGS_gpp.md`.
 
@@ -1067,9 +1076,17 @@ was outside this scope and is the obvious next step.
 | mean LAI | 7.49 | **2.48** | ~2.1–2.3 |
 | GPP at mean LAI 2.8–3.6 | 2,056 (2.00×) | **1,219 (1.19×)** | — |
 
-**The structural error estimate for the thesis is ≈ 1.2×, with its sign
-undetermined**: across defensible canopy bands the residual runs 0.90× to 1.19×,
-so zero is inside the range. It is firmly no longer a factor of two.
+**The structural error estimate for the thesis: no detectable magnitude bias,
+and the residual depends on an unsourced assumption.** Across defensible canopy
+bands the residual runs 0.90× to 1.19× and zero is inside the range. It is firmly
+no longer a factor of two.
+
+But the all-sided-to-projected LAI ratio moves it further than the canopy band
+does: **1.03× at ratio 2.0, 0.73× at 2.5, 0.58× at 3.0**, with zero inside the
+IQR only at 2.0 (§6, `FINDINGS_gpp.md`). On the adopted 2.5 the model
+*under*-produces by 27% — the sign is opposite to the withdrawn claims. Quote the
+conclusion as "no detectable magnitude bias, conditional on `ceff` U(5, 20) and
+an all-sided-to-projected ratio of 2.0–2.5", not as a single number.
 
 **A correction to how the canopy band is read.** Kolari's 3.2 and 2.6 are
 seasonal *maxima*; the diagnostic's `lai_mean` is an annual *mean*, and comparing
