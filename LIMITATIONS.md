@@ -34,64 +34,62 @@ under GPP for much of the year.
   in evergreen forests exposed to high sunlight and below-freezing spring
   temperature. They add a temperature sensitivity. **Get the full citation.**
 
-### 1a. The mechanism, and a direct measurement of the gap
+### 1a. What was withdrawn, and what stands
 
-**The mechanism is delayed temperature acclimation of photosynthetic capacity.**
-Kolari (2010), Dissertationes Forestales 99, reports October GPP at SMEAR II
-averaging **76% of April GPP** over 1997–2007, at nearly equal monthly mean
-temperatures — 3.5 °C April against 4.1 °C October. Capacity in autumn is still
-high, carried over from summer; in spring it has not yet recovered. ACM has no
-state variable for capacity, so it cannot produce this.
+> **Withdrawn.** This entry previously reported a **2.00× structural ACM
+> productivity bias** at the measured canopy, and before that a 2.3× GPP
+> overestimate driven by leaf area. **Both are withdrawn.** They were measuring
+> the DALEC2 `ceff` prior U(10, 100), whose median near 55 the site does not
+> support, and they compared an annual-mean modelled LAI against a
+> seasonal-maximum measured one. See `reports/prior_diagnostics/FINDINGS_gpp.md`
+> for the full sequence.
 
-**Verified against our own data before use.** The site's partitioned products
-over the calibration block give October/April ratios of **0.705** (`gpp_nt`) and
-**0.747** (`gpp_dt`), bracketing Kolari's 0.76. The driver temperatures match too:
-3.61 °C April against 4.02 °C October.
+**There is no detectable GPP magnitude bias.** With `ceff` on REFLEX's published
+U(5, 20) and the annual-mean canopy comparison corrected, the residual runs
+**0.90× to 1.19×** across defensible canopy bands, and zero bias is inside that
+range. This conclusion is load-bearing on the `ceff` prior: on the DALEC2 range
+the residual is 2.0–2.9×.
 
-**The test, and the result** (`scripts/12_acm_asymmetry.py`, 150 draws):
+**The seasonal distribution defect stands, and did not respond to any prior
+change.**
 
 | | October / April GPP |
 |---|---:|
-| measured (Kolari) | **0.76** |
-| measured (`gpp_nt` / `gpp_dt`) | 0.705 / 0.747 |
-| **modelled, median** | **0.290** |
-| modelled IQR | 0.274 – 0.331 |
-| ratio modelled / measured | **0.38×** |
-| draws below the measured ratio | **97.2%** |
+| measured (Kolari 2010, EC) | **0.76** |
+| cross-check, `gpp_nt` / `gpp_dt` | 0.705 / 0.747 |
+| modelled, flat priors | 0.290 |
+| modelled, canopy priors | 0.290 |
+| **modelled, current** | **0.397** |
+| **ratio** | **0.52×** |
+| **draws below the measured ratio** | **100.0%** |
 
-**The model gets autumn productivity wrong by a factor of about 2.6**, and it is
-not a tail effect: 97.2% of draws fall below the measured ratio and the IQR does
-not come close to it.
+Correcting the GPP magnitude by a factor of three moved this from 0.38× to 0.52×
+and left **every** draw below the measured value. Magnitude and seasonal
+distribution are separate defects; only the first was ever a prior problem.
 
-**Why it fails in this direction is the substantive point.** April and October
-have almost identical mean temperature, but April irradiance is **12.95** against
-October's **3.09** — a factor of 4.2. ACM is radiation-driven, so it predicts a
-ratio near the irradiance ratio of 0.24; the model's 0.29 is close to exactly
-that. The real canopy achieves 0.76 *despite* one quarter the light, because its
-photosynthetic capacity is still summer-acclimated.
+**The mechanism.** April and October have almost identical mean temperature in
+this block — 3.61 °C against 4.02 °C, matching Kolari's 3.5 and 4.1 — but April
+irradiance is **12.95** against October's **3.09**, a factor of 4.2. ACM is
+radiation-driven and returns approximately the irradiance ratio of 0.24. The real
+canopy achieves 0.76 on a quarter of the light because its photosynthetic
+capacity is still summer-acclimated. **ACM is not missing a modest autumn
+deficit; it is missing a large autumn enhancement.**
 
-So the limitation is not that ACM misses a modest autumn deficit. **It is that
-ACM misses a large autumn enhancement**, and reproduces the radiation ratio
-instead of the observed one. This is the quantitative form of the entry above.
+**Validation or consistency check?** Both, in different parts.
 
-**Is this validation or a consistency check?** Partly the former. Kolari et al.
-(2009), paper V, derives the seasonal course of photosynthetic capacity twice —
-once from a delayed temperature history, and once **"directly from the measured
-shoot CO₂ exchange"** using automated 1 dm³ chambers closed 70–100 times a day.
-The chamber route involves no eddy covariance, so the delayed-acclimation
-mechanism is established independently of the NEE signal DALEC is calibrated
-against, and the model's failure to reproduce it is not circular.
+Kolari et al. (2009), paper V, derives the seasonal course of photosynthetic
+capacity twice: once from a delayed temperature history, and once **"directly
+from the measured shoot CO₂ exchange"** using automated 1 dm³ chambers closed
+70–100 times a day, with **no eddy covariance involved**. So the
+delayed-acclimation mechanism is established independently of the NEE signal
+DALEC is calibrated against, and the model's failure to reproduce it is not
+circular. **The mechanism is validated.**
 
-The specific **0.76 is EC-derived**, however, and our cross-check against
-`gpp_nt`/`gpp_dt` (0.705, 0.747) uses the same partitioned data. A fully
-independent number would need October/April computed from the chamber-based GPP
-series, which is published only as a figure. **The mechanism is validated; the
-ratio is a consistency check.** Say so in the thesis.
-
-**After the REFLEX `ceff` prior and derived initial pools** (DECISIONS §9) the
-modelled ratio improved from 0.290 to **0.397**, still **0.52×** the measured
-value, with **100%** of draws below it. Correcting the magnitude of GPP does not
-correct its seasonal distribution — these are separate defects.
+The specific **0.76 is EC-derived**, and our cross-check against `gpp_nt` and
+`gpp_dt` uses the same partitioned data, so it is not independent either. A fully
+independent number would require October/April computed from the chamber-based
+GPP series, published only as a figure. **The ratio is a consistency check.**
+State it that way in the thesis.
 
 **Our position.** Do not implement the fix. It adds parameters, which directly
 worsens the identifiability question RQ3 asks about. Cite both papers, state the

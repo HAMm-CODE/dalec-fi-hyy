@@ -1,0 +1,48 @@
+==========================================================================
+  Part 1 -- the foliar steady-state identity at the model's fixed point
+==========================================================================
+  block 1997-2010, 40 draws, cycled to convergence (tol 0.001, max 60)
+  outcome of the spin-up:
+    converged    16 / 40
+    collapsed    24 / 40
+  converged: 16 of 40 draws, median 5 cycles (70 years)
+
+  At the fixed point, annual foliar loss equals annual input, so
+  (f_fol + f_lab) * GPP is the litterfall the model sustains.
+==========================================================================
+  term                            median      IQR                measured
+  GPP                             1,665.678  1,430.001 to 2,494.604 1,028
+  allocation share f_fol+f_lab       0.190     0.170 to 0.244     0.1498
+  litterfall = share * GPP         318.400   242.921 to 616.499   154
+  C_fol                            890.161   589.344 to 1,708.664 
+  LAI (projected)                    4.102     3.278 to 9.097     
+  c_lf                               0.271     0.241 to 0.297     
+
+  Which term carries the discrepancy?
+==========================================================================
+    allocation share   0.1896 vs measured 0.1498   ratio 1.27x
+    GPP                1,666 vs measured 1,028       ratio 1.62x
+    litterfall         318 vs measured 154         ratio 2.07x
+    the two multiply:  1.27 x 1.62 = 2.05
+
+    c_lf median 0.2713 (residence 3.7 yr) -- inside the measured 3-5 yr, so turnover is NOT the culprit
+    C_fol 890 against 568 implied by the measured litterfall at this c_lf
+    LAI 4.1 against a measured annual mean of about 2.1-2.3
+
+==========================================================================
+  Part 2 -- the all-sided to projected LAI ratio is conventional
+==========================================================================
+  lma = C_fol / (max all-sided LAI / ratio); mean projected LAI band
+  = mean all-sided 5.25-5.7 over the ratio.
+
+  ratio   lma bounds      mean projected LAI    n   median GPP   residual
+  2.0       116-192       2.62-2.85             10      1,061   1.03x
+  2.5       144-241       2.10-2.28             12        753   0.73x   <- adopted
+  3.0       173-289       1.75-1.90             17        598   0.58x
+
+  Does zero bias stay inside the residual range in every case?
+    ratio 2.0   median 1.03x   IQR 0.89x to 1.19x   1.00x inside IQR: YES
+    ratio 2.5   median 0.73x   IQR 0.58x to 0.99x   1.00x inside IQR: NO
+    ratio 3.0   median 0.58x   IQR 0.47x to 0.78x   1.00x inside IQR: NO
+
+  -> reports\prior_diagnostics\foliage_fixed_point.csv

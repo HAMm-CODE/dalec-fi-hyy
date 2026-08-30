@@ -484,13 +484,22 @@ Flagged here so they cannot quietly become fact:
   now takes U(144, 241) g C m⁻² derived from measured needle litterfall,
   longevity and projected LAI. See §8. The Loobos 110 is retained only as
   coefficient-set provenance.
-- Fox et al. (2009) REFLEX §4.5 and Carvalhais et al. (2008) are cited in §9 for
-  initial-state error biasing parameters and inflating confidence intervals.
-  **Both taken at second hand from the modelling literature and not read in
-  full.** The REFLEX Table 4 `ceff` range U(5, 20) is likewise unverified
-  against the paper.
-- The conifer all-sided to projected leaf area ratio of 2.5 is a conventional
-  value, not a Kolari measurement.
+- **`REFLEX_CEFF_BOUNDS` U(5, 20) is load-bearing**: the conclusion that GPP has
+  no detectable magnitude bias depends on it, and on the DALEC2 range the
+  residual is 2.0–2.9× instead of 0.90–1.19×. Fox et al. (2009) Table 4, for the
+  same ACM parameter `a1`. **Verified at source by the user; not independently
+  checked in this session** — ScienceDirect is paywalled and the Reading and
+  Edinburgh repository copies are access-restricted. Record the table and page in
+  the thesis.
+- Fox et al. (2009) §4.5 is cited in §9 on initial pool states. **Not read in
+  full.** Carvalhais et al. (2008) has been downgraded to a see-also; the
+  initial-state argument no longer depends on it.
+- **The conifer all-sided to projected leaf area ratio of 2.5 is load-bearing and
+  has no source.** No Scots pine measurement was found. `lma` rests on it, and so
+  does the magnitude conclusion: the GPP residual at the measured canopy is 1.03×
+  at ratio 2.0, 0.73× at 2.5 and 0.58× at 3.0, and zero bias is inside the IQR
+  only at 2.0. Finding a measured ratio is the highest-value outstanding
+  citation.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
   judgement about boreal soils, not a measurement. It is now the only unsourced
   input to the respiration prior: τ7 records sources for everything else.
@@ -995,13 +1004,18 @@ monotonically from **1,497 in 1997 to 1,041 in 2010 and was still falling**. The
 model never reaches steady state inside the calibration window, so **every
 calibration year was a relaxation transient away from a wrong initial state**.
 
-This is a known failure mode, not a novel concern. REFLEX (Fox et al. 2009)
-§4.5 treats initial pool states as part of what must be estimated and reports
-that errors in them propagate into the parameter estimates. Carvalhais et al.
-(2008) show that assuming steady state when a site is not at equilibrium biases
-retrieved parameters and **inflates confidence intervals** — the estimates are
-both wrong and falsely precise. Both citations are taken from the modelling
-literature at second hand and **have not been read in full**; see §6.
+This is a known failure mode, not a novel concern: REFLEX (Fox et al. 2009)
+§4.5 treats initial pool states as part of what must be estimated rather than
+assumed. **Not read in full**; see §6.
+
+**Carvalhais et al. (2008) is downgraded to a see-also.** It was cited here for
+initial-state error biasing parameters and inflating confidence intervals, but
+the argument no longer needs it: the case for deriving the pools rests on the
+site's own measurements and on the trajectory this project measured directly —
+`c_fol_0`'s published median of 1,010 against the 462–770 the canopy priors
+imply, and a monotone fall from 1,497 to 1,041 still descending at 2010. That is
+first-hand evidence from this model on this block, and it does not require a
+second-hand citation to carry it.
 
 ### It did not deliver a stationary trajectory
 
@@ -1015,9 +1029,22 @@ now shows is that the *model's own fixed point* under most prior draws lies belo
 the measured canopy: with `ceff` spanning 5–20, many draws produce GPP too low to
 sustain 579 g C m⁻² of foliage.
 
-**The drift is no longer an initial-state error; it is the GPP–LAI fixed point
-disagreeing with the measurement.** That is a better problem to have — it is
-diagnostic rather than self-inflicted — but the stated goal is not met.
+**The drift is no longer an initial-state error**, and the diagnosis is sharper
+than first stated. Cycling the block to convergence (`scripts/13_foliage_fixed_point.py`,
+40 draws, up to 60 cycles) shows the model is **bistable**: 24 of 40 draws
+collapse to a bare canopy and 16 run away to a dense one, and **none settles at
+the measured leaf area**. The site's own canopy sits at an *unstable*
+equilibrium, because the LAI → GPP → allocation → LAI loop has gain above one
+there.
+
+On the converged branch the litterfall excess factorises cleanly — allocation
+1.27× times GPP 1.62× gives 2.05× against an observed 2.07× — and `c_lf` at 0.271
+(3.7 yr) sits inside the measured 3–5 yr, so **turnover is not the culprit**. The
+answer to "allocation too low, turnover too high, or GPP too low" is none of the
+three: on the surviving branch both allocation and GPP are too *high*.
+
+The stated goal of a stationary trajectory is not met, and now it is clear that no
+initial condition could have met it.
 
 ### `c_roo_0` inherits a prior that is too wide
 
@@ -1092,7 +1119,8 @@ and only the first responded to the priors. See LIMITATIONS §1a.
   Table 4 `a1` range and §4.5. **Not read in full.**
 - Carvalhais, N. et al. (2008). Implications of the carbon cycle steady state
   assumption for biogeochemical modeling performance and inverse parameter
-  retrieval. *Global Biogeochemical Cycles* 22, GB2007. **Not read in full.**
+  retrieval. *Global Biogeochemical Cycles* 22, GB2007. **See-also only, not read
+  in full, and nothing in §9 depends on it.**
 - Kolari, P. et al. (2009). CO2 exchange and component CO2 fluxes of a boreal
   Scots pine forest. *Boreal Environment Research* 14, 761–783. Paper V of the
   dissertation. **Verified against the full paper** for the chamber-based
