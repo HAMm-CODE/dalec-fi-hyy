@@ -154,7 +154,7 @@ exactly, asserted in tests). The cause is diagnosed below: the model is
 **bistable**, and the measured canopy sits at an unstable equilibrium between a
 runaway branch and a collapsing one.
 
-## The foliar fixed point: the model is bistable, and neither branch is the site
+## The foliar fixed point: no draw settles at the measured canopy
 
 `scripts/13_foliage_fixed_point.py`, 40 draws, block cycled to convergence on the
 end-of-cycle foliar pool (tolerance 10⁻³, up to 60 cycles ≈ 840 years).
@@ -171,11 +171,9 @@ end-of-cycle foliar pool (tolerance 10⁻³, up to 60 cycles ≈ 840 years).
 or it collapses. The 14-year trajectory falling 562 → 177 is the collapsing
 majority; the converged minority goes the other way.
 
-That is bistability with an **unstable equilibrium near the measured leaf area**:
-the LAI → GPP → foliar allocation → LAI loop has gain greater than one there, so
-a canopy at the site's own LAI is pushed away from it in whichever direction it
-is nudged. It is not a slow relaxation from a bad initial state — the initial
-state is right by construction — it is a fixed point the model cannot hold.
+Whether that is one system with two attractors or two populations of
+parameter sets is a separate question, tested directly below. It is **not** a slow
+relaxation from a bad initial state: the initial state is right by construction.
 
 ### The identity, on the converged branch
 
@@ -232,19 +230,97 @@ multimodality in the foliage-related parameters.**
 Caveats: 40 draws, 16 on the converged branch, and the IQRs are wide. The
 direction and the bistability are robust; the specific ratios are indicative.
 
-## The 2.5 all-sided-to-projected LAI ratio is also load-bearing
+## The 24/16/0 split: mixed, and the mixture is the point
 
-**No Scots pine measurement was found**, so the ratio remains a **conventional
-assumption**, recorded as such in DECISIONS §6. It is not innocuous:
+`scripts/14_bistability_test.py`. Same parameter set, integrated to convergence
+from two very different starting canopies — 25 and 2,500 g C m⁻² — against a
+measured 462–770. Same endpoint from both means one attractor (reading B);
+different endpoints means two (reading A).
 
-| ratio | `lma` bounds | mean projected LAI band | n | median GPP | residual | 1.00× inside IQR |
-|---:|---|---|---:|---:|---:|---|
-| 2.0 | 116–192 | 2.62–2.85 | 10 | 1,061 | **1.03×** | **YES** (0.89–1.19) |
-| **2.5 (adopted)** | 144–241 | 2.10–2.28 | 12 | 753 | **0.73×** | **NO** (0.58–0.99) |
-| 3.0 | 173–289 | 1.75–1.90 | 17 | 598 | **0.58×** | **NO** (0.47–0.78) |
+**The answer is neither reading alone.**
 
-**Zero bias does not stay inside the residual range in all three cases.** It sits
-inside only at ratio 2.0. At 2.5 and 3.0 the model under-produces by 27% and 42%.
+| draw | branch | derived `c_fol_0` | from 25 | from 2,500 | verdict |
+|---:|---|---:|---:|---:|---|
+| 0 | collapsed | 712 | 0.3 collapsed | 1.4 collapsed | **monostable** |
+| 2 | collapsed | 575 | 0.9 collapsed | 0.1 collapsed | **monostable** |
+| 3 | collapsed | 565 | 0.1 collapsed | 2.0 collapsed | **monostable** |
+| 1 | converged | 518 | **707.5** | **707.5** | **monostable** |
+| 7 | converged | 525 | 1.5 collapsed | 518.1 converged | **bistable** |
+| 8 | converged | 596 | 3.5 collapsed | 1,859.7 converged | **bistable** |
+
+**Reading B holds for the collapsed branch.** All three tested sets are
+monostable with zero as the only attractor: the foliage loop gain is below one
+everywhere, and no initial condition rescues them. For 24 of 40 draws the canopy
+cannot be sustained at all.
+
+**Reading A holds for part of the converged branch.** Draws 7 and 8 have two
+attractors — zero and a high canopy — and the initial condition selects between
+them. Draw 1 does not, reaching 707.5 from both starts.
+
+So the population is **a mixture**: mostly monostable-at-zero, with a genuinely
+bistable subset. The measured canopy is not on a single global separatrix; it
+sits *above* the separatrix for the bistable sets, since they converge from their
+derived start of 518–596 but collapse from 25.
+
+### The consequence that matters for sampling
+
+**`c_fol_0` is derived from `c_lf`** — `c_fol_0` = 154 / `c_lf`, giving 462–770
+across the `c_lf` prior. For a bistable parameter set, moving `c_lf` moves the
+initial condition, and if that crosses the separatrix the trajectory flips
+attractor and the likelihood jumps.
+
+**That is a discontinuity in the likelihood as a function of a sampled
+parameter**, and NUTS differentiates through exactly that. It is a concrete
+hazard, not a hypothetical one: draws 7 and 8 collapse from 25 and converge from
+their derived value, so a separatrix lies between.
+
+### Revised RQ3 prediction
+
+The two readings imply different things and **both mechanisms are present**:
+
+- **From the monostable majority (B):** the sampler is pushed away from those
+  parameter values entirely. Expect the posterior to concentrate where the canopy
+  is sustainable, which is a subset of the prior selected by dynamics rather than
+  by fit to NEE — a form of implicit constraint the priors do not state.
+- **From the bistable subset (A):** expect multimodality and poor mixing near the
+  separatrix, and expect it to appear in `c_lf` and the allocation parameters
+  rather than in the respiration parameters.
+
+**Concrete checks on the posterior:** divergences concentrated at particular
+`c_lf` values; a bimodal `c_fol` trajectory across chains; and chains that
+disagree about foliage while agreeing about NEE.
+
+Caveats: 6 parameter sets tested, 3 per branch. The monostability of the
+collapsed branch is unanimous; the bistable finding rests on 2 draws. The
+mixture is established, the proportions are not.
+
+
+## The LAI area basis is load-bearing, and open
+
+The ratio is now **sourced**: total/projected = 2.57 for Scots pine (Niinemets et
+al. 2001), matching bisected-cylinder geometry (π+2)/2 = 2.5708 (Grace 1987).
+Total/hemisurface = 2 exactly, by definition (Chen & Black 1992).
+
+**But which basis ACM expects is not settled, and the calibration cannot settle
+it** — ACM aggregates SPA, parameterised for a Quercus–Acer broadleaf stand where
+projected, hemisurface and total/2 are identical. See DECISIONS §10. The two
+readings differ by 37% in GPP and disagree on whether a magnitude bias exists:
+
+| basis | divisor | `lma` bounds | mean projected LAI | n | median GPP | residual | 1.00× in IQR |
+|---|---:|---|---|---:|---:|---:|---|
+| **hemisurface** | 2.000 | 116–192 | 2.62–2.85 | 10 | 1,061 | **1.03×** | **YES** (0.89–1.19) |
+| **projected** | 2.571 | 148–247 | 2.04–2.22 | 11 | 683 | **0.66×** | **NO** (0.58–0.99) |
+| (3.0, for scale) | 3.000 | 173–289 | 1.75–1.90 | 17 | 598 | 0.58× | NO (0.47–0.78) |
+
+**Zero bias sits inside the residual range on the hemisurface reading only.** On
+the projected reading the model under-produces by 34%.
+
+On physical grounds hemisurface is the principled extension: ACM's radiation
+scheme was fitted to flat leaves, where intercepting area per unit LAI is one
+side, and carrying it to needles unchanged requires the basis that preserves
+intercepting area. **But that is also the reading that closes the residual, which
+is grounds for more scrutiny rather than less.** It is recorded as the
+better-argued reading, not adopted because it fits.
 
 **This qualifies the "no detectable magnitude bias" conclusion.** That conclusion
 is safe at ratio 2.0 and weakens as the ratio rises, and the *sign* flips relative

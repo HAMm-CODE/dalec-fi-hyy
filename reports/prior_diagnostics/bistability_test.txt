@@ -1,0 +1,56 @@
+==========================================================================
+  Bistability (A) or monostability split across parameter space (B)?
+==========================================================================
+  block 1997-2010, 40 draws, seed 20260809
+  starts: 25 and 2500 g C m-2 against a measured 462-770
+
+  classification from the derived initial state:
+    collapsed    24
+    converged    16
+
+==========================================================================
+  The test: same parameter set, two very different starting canopies
+==========================================================================
+
+  draw   0  [collapsed]   derived c_fol_0   712.5
+    from      25  ->        0.3  (collapsed, 3 cycles)
+    from    2500  ->        1.4  (collapsed, 6 cycles)
+    same endpoint: YES -> monostable
+
+  draw   2  [collapsed]   derived c_fol_0   575.3
+    from      25  ->        0.9  (collapsed, 2 cycles)
+    from    2500  ->        0.1  (collapsed, 7 cycles)
+    same endpoint: YES -> monostable
+
+  draw   3  [collapsed]   derived c_fol_0   565.3
+    from      25  ->        0.1  (collapsed, 2 cycles)
+    from    2500  ->        2.0  (collapsed, 3 cycles)
+    same endpoint: YES -> monostable
+
+  draw   1  [converged]   derived c_fol_0   517.6
+    from      25  ->      707.5  (converged, 7 cycles)
+    from    2500  ->      707.5  (converged, 5 cycles)
+    same endpoint: YES -> monostable
+
+  draw   7  [converged]   derived c_fol_0   525.4
+    from      25  ->        1.5  (collapsed, 1 cycles)
+    from    2500  ->      518.1  (converged, 7 cycles)
+    same endpoint: NO -> two attractors
+
+  draw   8  [converged]   derived c_fol_0   596.4
+    from      25  ->        3.5  (collapsed, 2 cycles)
+    from    2500  ->     1859.7  (converged, 4 cycles)
+    same endpoint: NO -> two attractors
+
+==========================================================================
+  Verdict
+==========================================================================
+  parameter sets where both starts reach the same endpoint: 4 / 6
+  -> MIXED. Some sets are monostable and some are bistable; report
+     the split rather than a single reading.
+
+  -> reports\prior_diagnostics\bistability_test.csv
+
+  For context, annual GPP at the derived start, by branch:
+    collapsed   n= 24   median endpoint C_fol       0.5 g C m-2
+    converged   n= 16   median endpoint C_fol     956.9 g C m-2

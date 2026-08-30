@@ -494,12 +494,14 @@ Flagged here so they cannot quietly become fact:
 - Fox et al. (2009) §4.5 is cited in §9 on initial pool states. **Not read in
   full.** Carvalhais et al. (2008) has been downgraded to a see-also; the
   initial-state argument no longer depends on it.
-- **The conifer all-sided to projected leaf area ratio of 2.5 is load-bearing and
-  has no source.** No Scots pine measurement was found. `lma` rests on it, and so
-  does the magnitude conclusion: the GPP residual at the measured canopy is 1.03×
-  at ratio 2.0, 0.73× at 2.5 and 0.58× at 3.0, and zero bias is inside the IQR
-  only at 2.0. Finding a measured ratio is the highest-value outstanding
-  citation.
+- **The LAI area basis is load-bearing and OPEN.** The ratio is now sourced —
+  total/projected = 2.57 for Scots pine (Niinemets et al. 2001), matching
+  (π+2)/2 = 2.5708 (Grace 1987) — but *which basis ACM expects* is not settled,
+  and the calibration cannot settle it because ACM derives from SPA parameterised
+  on a broadleaf stand where all three bases coincide. Hemisurface gives a
+  divisor of exactly 2 and a residual of **1.03×**; projected gives 2.571 and
+  **0.66×**. The magnitude conclusion turns on this. See §10; the highest-value
+  outstanding citation is now Williams et al. (1997) Table 1.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
   judgement about boreal soils, not a measurement. It is now the only unsourced
   input to the respiration prior: τ7 records sources for everything else.
@@ -1105,6 +1107,91 @@ GPP improved from 0.290 to **0.397** against a measured 0.76 — still 0.52×, w
 and only the first responded to the priors. See LIMITATIONS §1a.
 
 
+## 10. The LAI area basis: three bases, and the calibration is silent
+
+**Recorded 2026-08-28.** `lma` and the GPP magnitude conclusion both rest on the
+divisor taken from Kolari's all-sided LAI. That divisor is now sourced, but the
+**convention question is not settled**, and this section records why.
+
+### There are three bases, not two
+
+| basis | definition | ratio to total |
+|---|---|---:|
+| **total** (all-sided) | the whole needle surface | 1 |
+| **hemisurface** | half the total | **exactly 2, by definition** |
+| **projected** | the shadow area | **2.571 for Scots pine** |
+
+- **Total / projected = 2.57** for Scots pine, Niinemets et al. (2001). This
+  matches bisected-cylinder geometry exactly: (π + 2)/2 = **2.5708**. Grace, J. C.
+  (1987), *NZ J For Sci* 17: 292–294, "Theoretical ratio between one-sided and
+  total surface area for pine needles".
+- **Total / hemisurface = 2** is a definition, not a measurement.
+- Therefore **hemisurface / projected = 1.285**.
+
+Chen, J.-M. and Black, T. A. (1992), *Plant Cell Environ* 15: 421–429, established
+**hemisurface** as the standard for radiation work, arguing that projection has
+neither physical nor biological significance whereas total intercepting area has
+physical meaning for radiation interception.
+
+### Which basis was ACM calibrated on? The calibration cannot say
+
+**This is the finding, and it is a negative one.**
+
+ACM (Williams et al. 1997) was not fitted to observations directly. Its own
+abstract states the starting point was "a fine-scale, multilayer model of
+half-hourly canopy processes that has been **parametrized for Harvard Forest,
+Massachusetts**" — that is SPA, Williams et al. (1996), built for a
+**Quercus–Acer deciduous broadleaf stand**.
+
+**For flat leaves the three bases collapse**: projected = hemisurface = total/2,
+identically. No needle geometry entered the calibration of either model, so
+**there is no fact of the matter recoverable from it**. ACM's coefficients are
+equally consistent with either reading, because the data that produced them could
+not distinguish the two.
+
+Internal evidence is likewise silent. Canopy quantum yield half-saturates at
+`L = sqrt(c2)` = 0.93 for Williams 1997 and `sqrt(a9)` = 1.45 and 1.03 for
+Chuter's two sets — all on a basis where, for the stand each was fitted to, the
+distinction either does not arise or was never stated.
+
+### What each reading implies
+
+| basis | divisor | max projected LAI | mean projected LAI | `lma` | median GPP | residual | zero in IQR |
+|---|---:|---:|---|---|---:|---:|---|
+| **hemisurface** | 2.000 | 4.00 | 2.62–2.85 | 116–192 | 1,061 | **1.03×** | **YES** (0.89–1.19) |
+| **projected** | 2.571 | 3.11 | 2.04–2.22 | 148–247 | 683 | **0.66×** | **NO** (0.58–0.99) |
+
+**The two readings differ by 37% in GPP and they disagree on whether the model
+has a magnitude bias at all.**
+
+### The recommendation, and the confound stated plainly
+
+**On physical grounds the hemisurface reading is the principled extension.** ACM's
+radiation scheme was fitted to flat-leaf geometry, where the intercepting area per
+unit LAI equals one side of the leaf. Carrying that scheme to needles without
+changing what it means requires the basis that preserves intercepting area, which
+is hemisurface — precisely Chen & Black's argument. The divisor is then exactly 2.
+
+**But the basis that physics favours is also the one that closes the residual,
+and that is a reason for more scrutiny rather than less.** It is recorded here as
+the better-argued reading, **not adopted on the strength of the fit**, and the
+projected reading is kept live in §6 as the alternative. Anyone writing this up
+must present both and say which they chose and why.
+
+### What would settle it
+
+1. **Williams et al. (1997) Table 1** — the same table that supplied the
+   `t_mean` calibration bound. Its LAI row, and whether the test set included any
+   needleleaf stand, would decide it. **Not accessible here**: Wiley returns 403,
+   the eScholarship copy served no text.
+2. **Williams et al. (1996)** — whether SPA states an area basis explicitly.
+3. Whether Chuter et al. (2015) state a basis for the Loobos and Oregon sets,
+   both of which are pine.
+
+Until one of those is checked, **the area basis is an open assumption on which
+the magnitude conclusion turns.**
+
+
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics
@@ -1138,6 +1225,19 @@ and only the first responded to the priors. See LIMITATIONS §1a.
   assumption for biogeochemical modeling performance and inverse parameter
   retrieval. *Global Biogeochemical Cycles* 22, GB2007. **See-also only, not read
   in full, and nothing in §9 depends on it.**
+- Niinemets, U. et al. (2001). Total-to-projected leaf area ratio for Scots
+  pine, 2.57. **Supplied, not read.**
+- Grace, J. C. (1987). Theoretical ratio between one-sided and total surface
+  area for pine needles. *NZ J For Sci* 17: 292–294. Bisected-cylinder
+  geometry, (π+2)/2 = 2.5708. **Supplied, not read.**
+- Chen, J.-M. and Black, T. A. (1992). Defining leaf area index for non-flat
+  leaves. *Plant Cell Environ* 15: 421–429. Establishes hemisurface as the
+  radiation standard. Abstract and secondary sources checked; **full paper not
+  read.**
+- Williams, M. et al. (1996). Modelling the soil-plant-atmosphere continuum in
+  a Quercus-Acer stand at Harvard Forest. *Plant Cell Environ* 19, 911–927.
+  SPA, the model ACM aggregates. **Not read; broadleaf parameterisation
+  established from the Williams 1997 abstract.**
 - Kolari, P. et al. (2009). CO2 exchange and component CO2 fluxes of a boreal
   Scots pine forest. *Boreal Environment Research* 14, 761–783. Paper V of the
   dissertation. **Verified against the full paper** for the chamber-based
