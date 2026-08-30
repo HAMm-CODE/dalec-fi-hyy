@@ -1,0 +1,34 @@
+==========================================================================
+  Locating the foliage separatrix
+==========================================================================
+  block 1997-2010, 40 draws, seed 20260809
+  derived c_fol_0 range: 462-770 g C m-2 (= 154 / c_lf across the c_lf prior)
+
+  screening for bistable sets (collapse from low, survive from high)...
+    draw   7  separatrix     97.6 (+/- 0.1)   derived  525.4   ceff 12.36  lma  178.4  f_fol 0.1600
+    draw   8  separatrix     30.2 (+/- 0.1)   derived  596.4   ceff 14.54  lma  235.7  f_fol 0.1797
+    draw  19  separatrix     86.6 (+/- 0.1)   derived  553.6   ceff  9.86  lma  181.3  f_fol 0.0905
+    draw  24  separatrix     56.6 (+/- 0.1)   derived  669.3   ceff 11.40  lma  187.4  f_fol 0.0787
+    draw  25  separatrix     43.5 (+/- 0.1)   derived  487.7   ceff 16.57  lma  208.1  f_fol 0.0713
+    draw  38  separatrix     52.7 (+/- 0.1)   derived  475.8   ceff 19.81  lma  146.3  f_fol 0.0816
+
+==========================================================================
+  6 bistable sets of 40 draws
+==========================================================================
+  separatrix   min     30.2   median     54.7   max     97.6
+  IQR 45.8 to 79.1
+
+  relative to the derived range 462-770:
+    below    6   the derived range is entirely sustainable
+    inside   0   moving c_lf walks the start across it
+    above    0   the derived range is entirely on the collapsing side
+
+  derived start above its own separatrix: 6 / 6
+
+  The separatrix is not a constant -- it moves with the parameters:
+    Spearman corr(separatrix, ceff ) = -0.600
+    Spearman corr(separatrix, lma  ) = -0.657
+    Spearman corr(separatrix, f_fol) = +0.086
+    Spearman corr(separatrix, c_lf ) = -0.029
+
+  -> reports\prior_diagnostics\separatrix.csv

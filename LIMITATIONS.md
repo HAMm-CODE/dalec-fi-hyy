@@ -495,6 +495,61 @@ are locked (DECISIONS §1) and this is a supervision question.
 
 ---
 
+## 15. ACM's leaf-area convention cannot be recovered from its own provenance
+
+**What it is.** ACM needs a leaf area index. For a conifer canopy there are three
+defensible bases — projected, hemisurface (half total), and total — and **ACM's
+own derivation cannot say which it expects.**
+
+ACM (Williams et al. 1997) was not fitted to observations. It aggregates SPA
+(Williams et al. 1996), parametrised for a **Quercus–Acer deciduous broadleaf
+stand at Harvard Forest**. For flat leaves projected, hemisurface and half-total
+are **identical**, so **no needle geometry entered either calibration**. Applying
+ACM to a conifer canopy therefore requires an area convention that its own
+provenance cannot supply.
+
+**The size of it.** The two defensible readings of Kolari's all-sided LAI:
+
+| basis | divisor | `lma`, g C m⁻² | median GPP | residual | zero bias in IQR |
+|---|---:|---|---:|---:|---|
+| hemisurface | 2.000 (exact, by definition) | 116–192 | 1,061 | **1.03×** | **YES** |
+| projected | 2.571 (Scots pine) | 148–247 | 683 | **0.66×** | **NO** |
+
+They differ by **37% in GPP** and **disagree on whether the model has a magnitude
+bias at all**. This is not a rounding question; it decides a headline result.
+
+Ratio sources: total/projected = 2.57 for Scots pine (Niinemets et al. 2001),
+matching bisected-cylinder geometry (π+2)/2 = 2.5708 (Grace 1987);
+total/hemisurface = 2 by definition, with hemisurface established as the
+radiation-work standard by Chen & Black (1992).
+
+**The citation hunt is closed, and this is why.** Williams et al. (1997) Table 1
+was previously named here as the thing that would settle it. **It cannot.** A
+flat-leaf calibration carries no needle basis *whatever LAI range it spans* — the
+table would tell us the magnitudes tested, not which convention to use for a
+geometry that never appeared in the fitting data. No document can supply an
+answer the underlying calibration never contained. Chasing further citations here
+is wasted effort.
+
+**Our position — both conventions stay live.** Neither is adopted. **The
+calibration will be run under both and the difference reported as a
+sensitivity.** That is the honest treatment of an ambiguity that is structural
+rather than empirical: it cannot be resolved by looking harder, so it is carried
+through to the results and shown.
+
+The hemisurface reading has the better physical argument — ACM's radiation scheme
+was fitted where intercepting area per unit LAI is one side of a flat leaf, and
+carrying it to needles unchanged requires the basis that preserves intercepting
+area. **It is also the reading that closes the GPP residual, which is grounds for
+scrutiny rather than confidence.** Both facts are stated wherever the result is.
+
+**Consequence for the thesis.** Any statement about GPP magnitude bias must be
+conditioned on the convention. "No detectable magnitude bias" is true on the
+hemisurface reading and false on the projected one, where the model
+under-produces by 34%.
+
+---
+
 ## Novelty claim — narrowed
 
 Do not claim gradients through DALEC are new. They are not:

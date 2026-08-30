@@ -500,8 +500,9 @@ Flagged here so they cannot quietly become fact:
   and the calibration cannot settle it because ACM derives from SPA parameterised
   on a broadleaf stand where all three bases coincide. Hemisurface gives a
   divisor of exactly 2 and a residual of **1.03×**; projected gives 2.571 and
-  **0.66×**. The magnitude conclusion turns on this. See §10; the highest-value
-  outstanding citation is now Williams et al. (1997) Table 1.
+  **0.66×**. The magnitude conclusion turns on this. **Not resolvable by citation
+  — the citation hunt is closed** (§10, LIMITATIONS §15). Both conventions stay
+  live and the calibration will be run under both as a sensitivity.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
   judgement about boreal soils, not a measurement. It is now the only unsourced
   input to the respiration prior: τ7 records sources for everything else.
@@ -1178,18 +1179,25 @@ the better-argued reading, **not adopted on the strength of the fit**, and the
 projected reading is kept live in §6 as the alternative. Anyone writing this up
 must present both and say which they chose and why.
 
-### What would settle it
+### Nothing can settle it, and the citation hunt is closed
 
-1. **Williams et al. (1997) Table 1** — the same table that supplied the
-   `t_mean` calibration bound. Its LAI row, and whether the test set included any
-   needleleaf stand, would decide it. **Not accessible here**: Wiley returns 403,
-   the eScholarship copy served no text.
-2. **Williams et al. (1996)** — whether SPA states an area basis explicitly.
-3. Whether Chuter et al. (2015) state a basis for the Loobos and Oregon sets,
-   both of which are pine.
+An earlier version of this section named **Williams et al. (1997) Table 1** as
+the thing that would decide the basis. **It cannot, and neither can any other
+document.** A flat-leaf calibration carries no needle basis *whatever LAI range
+it spans*: the table would report the magnitudes tested, not the convention to
+apply to a geometry that never appeared in the fitting data. The ambiguity is
+**structural, not bibliographic** — there is no answer to find because the
+calibration never contained one.
 
-Until one of those is checked, **the area basis is an open assumption on which
-the magnitude conclusion turns.**
+**Decision: both conventions stay live. Neither is adopted.** The calibration
+will be **run under both and the difference reported as a sensitivity**. That is
+the honest treatment of an ambiguity that cannot be resolved by looking harder.
+
+Recorded as a limitation in its own right: LIMITATIONS §15.
+
+Practical consequence: any statement about GPP magnitude bias must carry the
+convention with it. "No detectable magnitude bias" holds on the hemisurface
+reading and fails on the projected one, where the model under-produces by 34%.
 
 
 ## References

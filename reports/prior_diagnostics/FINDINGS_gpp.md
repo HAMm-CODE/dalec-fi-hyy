@@ -262,17 +262,105 @@ bistable subset. The measured canopy is not on a single global separatrix; it
 sits *above* the separatrix for the bistable sets, since they converge from their
 derived start of 518–596 but collapse from 25.
 
-### The consequence that matters for sampling
+### The consequence for sampling — corrected
+
+> **Correction.** An earlier version of this section called the separatrix a
+> **discontinuity in the likelihood** and said NUTS would fail on the gradient.
+> **That was wrong.** Over a finite 14-year integration the likelihood is
+> **continuous**, with a very steep ramp near the separatrix rather than a jump:
+> a parameter set sitting just inside the separatrix moves slowly and lands at
+> neither attractor within the window. The discontinuity is a property of the
+> infinite-time limit, not of the model we actually integrate.
 
 **`c_fol_0` is derived from `c_lf`** — `c_fol_0` = 154 / `c_lf`, giving 462–770
-across the `c_lf` prior. For a bistable parameter set, moving `c_lf` moves the
-initial condition, and if that crosses the separatrix the trajectory flips
-attractor and the likelihood jumps.
+across the `c_lf` prior. For a bistable set, moving `c_lf` walks the initial
+condition toward or across the separatrix, and the 14-year endpoint changes
+steeply but smoothly as it does.
 
-**That is a discontinuity in the likelihood as a function of a sampled
-parameter**, and NUTS differentiates through exactly that. It is a concrete
-hazard, not a hypothetical one: draws 7 and 8 collapse from 25 and converge from
-their derived value, so a separatrix lies between.
+**The ramp width shrinks as the integration lengthens.** A trajectory starting
+near the separatrix departs it at a rate set by the local loop gain, so the
+longer the record, the further it gets and the sharper the transition in the
+likelihood. In the infinite-time limit it becomes a genuine step; at fourteen
+years it is a steep ramp.
+
+**So the prediction is divergences and poor mixing, not gradient failure.** The
+gradient exists everywhere and is finite everywhere; it is simply very large in a
+narrow region of `c_lf`. That is the classic setting for NUTS divergences — a
+region of high curvature the integrator cannot resolve at the adapted step size —
+and for chains that mix badly across it, not for a sampler that breaks.
+
+### The window-length tension this creates
+
+**The calibration window was set at 1997–2010 because the slow pools need a long
+record**: wood and soil turnover are only identifiable over many years, and
+DECISIONS §1 fixes the block on that basis.
+
+**The same length sharpens the foliage separatrix.** Fourteen years is long
+enough for a trajectory near the separatrix to commit to one attractor, which is
+exactly what turns a gentle gradient into a steep ramp. A shorter window would
+leave more sets mid-transit and soften the ramp; it would also weaken the slow
+pools that motivated the length in the first place.
+
+**Window length therefore trades slow-pool identifiability against foliage-loop
+conditioning**, and the two want opposite things. This is recorded rather than
+resolved: the year blocks are locked (DECISIONS §1) and the trade is a
+supervision question, not one to settle by quietly shortening the block.
+
+### Where the separatrix actually sits
+
+`scripts/15_separatrix.py`. Bisection on the initial foliar pool for every
+bistable set among the 40 draws, 14 steps, bracket resolved to ±0.1 g C m⁻².
+
+| draw | separatrix | derived `c_fol_0` | headroom | `ceff` | `lma` | `f_fol` |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 30.2 | 596.4 | 19.7× | 14.54 | 235.7 | 0.180 |
+| 25 | 43.5 | 487.7 | 11.2× | 16.57 | 208.1 | 0.071 |
+| 24 | 56.6 | 669.3 | 11.8× | 11.40 | 187.4 | 0.079 |
+| 19 | 86.6 | 553.6 | 6.4× | 9.86 | 181.3 | 0.091 |
+| 7 | 97.6 | 525.4 | 5.4× | 12.36 | 178.4 | 0.160 |
+
+Six bistable sets of 40. Separatrix **min 30.2, median 54.7, max 97.6**
+g C m⁻², IQR 45.8–79.1.
+
+| relative to the derived range 462–770 | count |
+|---|---:|
+| **below 462** — derived range entirely sustainable | **6 / 6** |
+| inside 462–770 — moving `c_lf` walks the start across it | 0 |
+| above 770 — derived range entirely collapsing | 0 |
+
+**The separatrix sits entirely below the derived range**, by a factor of at least
+4.7 even at its highest. Every bistable set starts above its own separatrix.
+**The sampler does not cross it at the prior**: varying `c_lf` over its full range
+moves `c_fol_0` between 462 and 770, and the nearest separatrix is at 97.6.
+
+### But a clean result at the prior does not guarantee one at the posterior
+
+**The separatrix is not a constant — it moves with the parameters**, and the ones
+it moves with are exactly those the posterior will reshape:
+
+| | Spearman ρ with separatrix | n = 6 |
+|---|---:|---|
+| `lma` | −0.657 | not significant |
+| `ceff` | −0.600 | not significant |
+| `f_fol` | +0.086 | — |
+| `c_lf` | −0.029 | — |
+
+**None of these is statistically meaningful at n = 6** — Spearman needs |ρ| > 0.83
+for p < 0.05 at this sample size, and none reaches it. The signs are physically
+sensible (a more productive canopy, higher `ceff`, sustains itself from a smaller
+start) but they are indicative only.
+
+What matters is the structural point rather than the coefficients: **the
+separatrix depends on `f_fol`, `lma` and `ceff`, so a posterior that pulls those
+toward lower productivity moves the separatrix up toward the derived range.** The
+4.7× headroom is measured at the prior and is not a guarantee. It should be
+re-measured on posterior draws, not assumed to carry over.
+
+**Combined with the ramp argument above**: the likelihood is continuous, the
+separatrix is far from where the prior puts the initial condition, and so the
+divergence risk is lower than the first reading of the 24/16 split suggested. The
+monostable-collapse majority remains the dominant effect — 24 of 40 draws cannot
+sustain a canopy from any starting point.
 
 ### Revised RQ3 prediction
 
@@ -282,9 +370,11 @@ The two readings imply different things and **both mechanisms are present**:
   parameter values entirely. Expect the posterior to concentrate where the canopy
   is sustainable, which is a subset of the prior selected by dynamics rather than
   by fit to NEE — a form of implicit constraint the priors do not state.
-- **From the bistable subset (A):** expect multimodality and poor mixing near the
-  separatrix, and expect it to appear in `c_lf` and the allocation parameters
-  rather than in the respiration parameters.
+- **From the bistable subset (A):** expect **divergences and poor mixing** near
+  the separatrix — not gradient failure — and expect them in `c_lf` and the
+  allocation parameters rather than the respiration ones. Multimodality is
+  possible but is the weaker prediction: over a finite window the two branches
+  are joined by a steep ramp rather than separated by a gap.
 
 **Concrete checks on the posterior:** divergences concentrated at particular
 `c_lf` values; a bimodal `c_fol` trajectory across chains; and chains that
