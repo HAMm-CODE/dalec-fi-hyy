@@ -74,6 +74,25 @@ So the limitation is not that ACM misses a modest autumn deficit. **It is that
 ACM misses a large autumn enhancement**, and reproduces the radiation ratio
 instead of the observed one. This is the quantitative form of the entry above.
 
+**Is this validation or a consistency check?** Partly the former. Kolari et al.
+(2009), paper V, derives the seasonal course of photosynthetic capacity twice —
+once from a delayed temperature history, and once **"directly from the measured
+shoot CO₂ exchange"** using automated 1 dm³ chambers closed 70–100 times a day.
+The chamber route involves no eddy covariance, so the delayed-acclimation
+mechanism is established independently of the NEE signal DALEC is calibrated
+against, and the model's failure to reproduce it is not circular.
+
+The specific **0.76 is EC-derived**, however, and our cross-check against
+`gpp_nt`/`gpp_dt` (0.705, 0.747) uses the same partitioned data. A fully
+independent number would need October/April computed from the chamber-based GPP
+series, which is published only as a figure. **The mechanism is validated; the
+ratio is a consistency check.** Say so in the thesis.
+
+**After the REFLEX `ceff` prior and derived initial pools** (DECISIONS §9) the
+modelled ratio improved from 0.290 to **0.397**, still **0.52×** the measured
+value, with **100%** of draws below it. Correcting the magnitude of GPP does not
+correct its seasonal distribution — these are separate defects.
+
 **Our position.** Do not implement the fix. It adds parameters, which directly
 worsens the identifiability question RQ3 asks about. Cite both papers, state the
 limitation, quantify it with the shoulder-season diagnostic

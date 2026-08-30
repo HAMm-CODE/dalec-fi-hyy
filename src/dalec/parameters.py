@@ -54,12 +54,14 @@ __all__ = [
     "ALL_SIDED_TO_PROJECTED",
     "ANNUAL_LITTER_INPUT_G_C_M2",
     "ANNUAL_RH_G_C_M2",
+    "BELOWGROUND_LITTERFALL_G_C_M2",
     "DAYS_PER_YEAR",
     "EMPIRICAL_TEMPERATURE_EXPONENT",
     "F_SOM_BOUNDS",
     "LAI_IS_PROJECTED",
     "LITTER_RESIDENCE_TIME_YEARS",
     "MEASURED_ALLOCATION_G_C_M2",
+    "MEASURED_FINE_ROOT_CARBON_G_C_M2",
     "NEEDLE_LITTERFALL_G_C_M2",
     "NEEDLE_LONGEVITY_YEARS",
     "PARAMETER_NAMES",
@@ -67,11 +69,13 @@ __all__ = [
     "PHENOLOGY_PARAMETERS",
     "PHOTOSYNTHESIS_PARAMETERS",
     "POOL_STATE_PARAMETERS",
+    "REFLEX_CEFF_BOUNDS",
     "RESPIRATION_REFERENCE_TEMPERATURE_C",
     "SIMPLEX_PARAMETERS",
     "SITE_PROJECTED_LAI",
     "SOIL_CARBON_STOCK_G_C_M2",
     "SOM_RESIDENCE_TIME_YEARS",
+    "TREE_CARBON_STOCK_G_C_M2",
     "TURNOVER_PARAMETERS",
     "DalecParameters",
     "Parameter",
@@ -79,8 +83,10 @@ __all__ = [
     "allocation_fractions",
     "canopy_bounds",
     "decomposition_multiplier",
+    "derive_initial_pools",
     "derive_litter_som_pools",
     "foliar_carbon_from_litterfall",
+    "implied_root_turnover",
     "leaf_mass_per_area_bounds",
     "phenology_psi_f",
     "prior_bounds",
@@ -673,6 +679,30 @@ MEASURED_ALLOCATION_G_C_M2: Final[dict[str, float]] = {
     "wood": 261.0,
 }
 
+#: ``ceff`` prior, dimensionless. Fox et al. (2009), the REFLEX model
+#: intercomparison, Table 4, published range for the same ACM parameter ``a1``.
+#:
+#: **This is adopting a published prior, not fitting to GPP.** It is narrower
+#: than the DALEC2 Table 1 U(10, 100) and it was not chosen by looking at the
+#: modelled GPP; it happens to move GPP downward, which is a consequence rather
+#: than the reason. Nothing here is tuned to the measured 952-1104.
+REFLEX_CEFF_BOUNDS: Final[tuple[float, float]] = (5.0, 20.0)
+
+#: Total tree carbon stock at FI-Hyy, g C m-2. Ilvesniemi et al. (2009) Fig. 6.
+#: Wood is whatever remains of it after the derived labile, foliar and fine-root
+#: pools are taken out.
+TREE_CARBON_STOCK_G_C_M2: Final[float] = 6800.0
+
+#: Below-ground tree litter production, g C m-2 yr-1. Ilvesniemi et al. (2009)
+#: Fig. 6, ~90; the paper assumes it equals needle litter. Sets the fine-root
+#: stock through the root turnover rate.
+BELOWGROUND_LITTERFALL_G_C_M2: Final[float] = 90.0
+
+#: Measured living fine-root biomass, g C m-2. Ilvesniemi et al. (2009) Table 4
+#: gives 476 g m-2 dry biomass; halved for carbon. Not used in any prior -- kept
+#: as an independent check on the derived ``c_roo_0``.
+MEASURED_FINE_ROOT_CARBON_G_C_M2: Final[float] = 238.0
+
 #: Total Dirichlet concentration for the allocation simplex. Sets how tightly the
 #: prior holds the measured shares. 20 gives a standard deviation on the foliar
 #: share of about 0.10, wide enough to contain the Fig. 6 spread without pinning
@@ -934,6 +964,10 @@ def canopy_bounds() -> dict[str, tuple[float, float]]:
     published U(0.125, 1.0) spans lifespans of 1 to 8 years, and its upper half
     has an evergreen shedding its needles inside eighteen months.
 
+    ``ceff`` U(5, 20), :data:`REFLEX_CEFF_BOUNDS`, the published REFLEX range for
+    the same ACM parameter. A published prior adopted in place of a wider
+    published prior -- not a value fitted to the measured GPP.
+
     **These are deliberately not written into the registry.** Tasks 1 and 2 are
     stated against the published priors and their numbers must stay reproducible,
     so the override lives with the sampler that uses it.
@@ -943,4 +977,84 @@ def canopy_bounds() -> dict[str, tuple[float, float]]:
     return {
         "lma": (round(lower), round(upper)),
         "c_lf": (1.0 / high_life, 1.0 / low_life),
+        "ceff": REFLEX_CEFF_BOUNDS,
     }
+
+
+def derive_initial_pools(
+    c_lf: np.ndarray | float,
+    theta_roo: np.ndarray | float,
+    f_lab: np.ndarray | float,
+    f_fol: np.ndarray | float,
+    *,
+    foliar_litterfall: float = NEEDLE_LITTERFALL_G_C_M2[1],
+    root_litterfall: float = BELOWGROUND_LITTERFALL_G_C_M2,
+    tree_carbon: float = TREE_CARBON_STOCK_G_C_M2,
+) -> dict[str, np.ndarray]:
+    """Initial labile, foliar, fine-root and wood pools from measured fluxes.
+
+    The same logic as ``rh_ref``: put the prior on a measured flux and a
+    turnover rate, and let the stock follow, rather than on the stock directly.
+
+    ``c_fol_0 = foliar_litterfall / c_lf``
+        At steady state foliage loses ``c_lf * C_fol`` per year and gains
+        ``(f_fol + f_lab) * GPP``; the measured litterfall is that flux, so the
+        stock follows without needing GPP at all.
+
+    ``c_lab_0 = foliar_litterfall * f_lab / (f_lab + f_fol)``
+        The labile pool accumulates its share of the same foliar flux over a
+        year and discharges it at bud burst, so at the 1 January start of the
+        block it holds about one year's accumulation.
+
+    ``c_roo_0 = root_litterfall / (theta_roo * 365.25)``
+        Root turnover carries no temperature term in A3, so the annual flux is
+        simply ``theta_roo * C_roo * 365.25``.
+
+    ``c_woo_0 = tree_carbon - c_lab_0 - c_fol_0 - c_roo_0``
+        Wood is the remainder of the measured tree carbon stock.
+
+    Returns
+    -------
+    Mapping of pool name to value, g C m-2, broadcast over the inputs.
+    """
+    fall = np.asarray(c_lf, dtype=float)
+    root_rate = np.asarray(theta_roo, dtype=float)
+    labile_share = np.asarray(f_lab, dtype=float)
+    foliar_share = np.asarray(f_fol, dtype=float)
+    if np.any(fall <= 0.0) or np.any(fall > 1.0):
+        raise ValueError("c_lf must lie in (0, 1]")
+    if np.any(root_rate <= 0.0):
+        raise ValueError("theta_roo must be strictly positive")
+    total_share = labile_share + foliar_share
+    if np.any(total_share <= 0.0):
+        raise ValueError("f_lab + f_fol must be strictly positive")
+
+    c_fol_0 = foliar_litterfall / fall
+    c_lab_0 = foliar_litterfall * labile_share / total_share
+    c_roo_0 = root_litterfall / (root_rate * DAYS_PER_YEAR)
+    c_woo_0 = tree_carbon - c_lab_0 - c_fol_0 - c_roo_0
+    if np.any(c_woo_0 <= 0.0):
+        raise ValueError(
+            "derived wood carbon is not positive: the labile, foliar and fine-root "
+            f"pools exhaust the {tree_carbon} g C m-2 tree stock on "
+            f"{int(np.count_nonzero(np.asarray(c_woo_0) <= 0.0))} draw(s). The "
+            "usual cause is theta_roo running to the slow end of its range."
+        )
+    return {
+        "c_lab_0": np.asarray(c_lab_0, dtype=float),
+        "c_fol_0": np.asarray(c_fol_0, dtype=float),
+        "c_roo_0": np.asarray(c_roo_0, dtype=float),
+        "c_woo_0": np.asarray(c_woo_0, dtype=float),
+    }
+
+
+def implied_root_turnover(
+    root_litterfall: float = BELOWGROUND_LITTERFALL_G_C_M2,
+    fine_root_carbon: float = MEASURED_FINE_ROOT_CARBON_G_C_M2,
+) -> float:
+    """``theta_roo`` implied by the site's own measured root stock and flux, d-1.
+
+    Reported, not adopted. It is a check on whether the published ``theta_roo``
+    range is plausible here, and it is not currently used to narrow it.
+    """
+    return root_litterfall / (fine_root_carbon * DAYS_PER_YEAR)

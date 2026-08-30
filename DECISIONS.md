@@ -484,6 +484,13 @@ Flagged here so they cannot quietly become fact:
   now takes U(144, 241) g C m⁻² derived from measured needle litterfall,
   longevity and projected LAI. See §8. The Loobos 110 is retained only as
   coefficient-set provenance.
+- Fox et al. (2009) REFLEX §4.5 and Carvalhais et al. (2008) are cited in §9 for
+  initial-state error biasing parameters and inflating confidence intervals.
+  **Both taken at second hand from the modelling literature and not read in
+  full.** The REFLEX Table 4 `ceff` range U(5, 20) is likewise unverified
+  against the paper.
+- The conifer all-sided to projected leaf area ratio of 2.5 is a conventional
+  value, not a Kolari measurement.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
   judgement about boreal soils, not a measurement. It is now the only unsourced
   input to the respiration prior: τ7 records sources for everything else.
@@ -943,6 +950,117 @@ published priors and their numbers must stay reproducible, so
 `sample_prior_parameters` and the registry are untouched.
 
 
+## 9. `ceff` from REFLEX, and every initial pool derived
+
+**Decided 2026-08-28.** Supersedes the published `ceff` prior and all six initial
+pool priors, for the reparameterised sampler only.
+
+### `ceff` — a published prior adopted in place of a wider published prior
+
+`ceff` takes **U(5, 20)**, Fox et al. (2009), the REFLEX model intercomparison,
+Table 4, published range for the same ACM parameter `a1`.
+
+**This is not fitting to GPP.** The range was taken from the intercomparison, not
+chosen by inspecting modelled output. It happens to move GPP downward, which is a
+consequence rather than the reason.
+
+Note it is **not a narrowing**: REFLEX's range extends *below* DALEC2's
+U(10, 100), and the measured GPP is reached at `ceff` ≈ 11–15, inside REFLEX and
+near the bottom of DALEC2. That is consistent with the GPP magnitude gate having
+passed at `ceff` ≈ 11.7 (§5a) and with Task 2's one-at-a-time optimum near 30
+being an artefact of the then-uncontrolled canopy.
+
+### Every initial pool is now derived
+
+The goal was that no initial state is left on a generic published range. All six:
+
+| pool | derivation | source of the flux |
+|---|---|---|
+| `c_lab_0` | litterfall · `f_lab`/(`f_lab`+`f_fol`) | Ilvesniemi Fig. 6, 154 |
+| `c_fol_0` | litterfall / `c_lf` | Ilvesniemi Fig. 6, 154 |
+| `c_roo_0` | below-ground litterfall / (`theta_roo`·365.25) | Ilvesniemi Fig. 6, ~90 |
+| `c_woo_0` | tree carbon − the other three | Ilvesniemi Fig. 6, 6,800 |
+| `c_lit_0` | (1−`f_som`)·`rh_ref` / `theta_lit` | §7 |
+| `c_som_0` | `f_som`·`rh_ref` / `theta_som` | §7 |
+
+Root and wood turnover carry no temperature term in A3/A4, so those annual fluxes
+are simply `theta · C · 365.25`; only litter and SOM decomposition take the
+`exp(Θ·T)` multiplier.
+
+### Why this was necessary
+
+`c_fol_0`'s published U(20, 2000) has median **1,010** against the **462–770**
+the canopy priors imply, and on that prior the modelled foliar trajectory fell
+monotonically from **1,497 in 1997 to 1,041 in 2010 and was still falling**. The
+model never reaches steady state inside the calibration window, so **every
+calibration year was a relaxation transient away from a wrong initial state**.
+
+This is a known failure mode, not a novel concern. REFLEX (Fox et al. 2009)
+§4.5 treats initial pool states as part of what must be estimated and reports
+that errors in them propagate into the parameter estimates. Carvalhais et al.
+(2008) show that assuming steady state when a site is not at equilibrium biases
+retrieved parameters and **inflates confidence intervals** — the estimates are
+both wrong and falsely precise. Both citations are taken from the modelling
+literature at second hand and **have not been read in full**; see §6.
+
+### It did not deliver a stationary trajectory
+
+Reported because the goal was explicit. After the change the trajectory falls
+from **562 in 1997 to 177 in 2010**, a 69% decline — in relative terms *worse*
+than the 30% before.
+
+**The initial value is nonetheless correct.** `c_lf · c_fol_0` returns the
+measured litterfall of 154 exactly, by construction and by test. What the drift
+now shows is that the *model's own fixed point* under most prior draws lies below
+the measured canopy: with `ceff` spanning 5–20, many draws produce GPP too low to
+sustain 579 g C m⁻² of foliage.
+
+**The drift is no longer an initial-state error; it is the GPP–LAI fixed point
+disagreeing with the measurement.** That is a better problem to have — it is
+diagnostic rather than self-inflicted — but the stated goal is not met.
+
+### `c_roo_0` inherits a prior that is too wide
+
+Deriving it from `theta_roo` moves the problem rather than solving it. The
+published `theta_roo` U(10⁻⁴, 10⁻²) spans fine-root residence times of 0.27 to 27
+years, and its median puts the stock at **49 g C m⁻² against a measured 238**
+(Ilvesniemi Table 4, 476 g m⁻² dry biomass halved for carbon).
+
+The site's own numbers pin it: 90 g C m⁻² yr⁻¹ through 238 g C m⁻² gives
+**`theta_roo` = 1.04×10⁻³ d⁻¹, a 2.6 year residence time**. Available as
+`implied_root_turnover()`, **reported and not adopted** — narrowing `theta_roo`
+was outside this scope and is the obvious next step.
+
+### The result
+
+| | before | after | measured |
+|---|---:|---:|---:|
+| median annual GPP | 2,972 | **956** | 952–1,104 |
+| ratio | 2.89× | **0.93×** | — |
+| mean LAI | 7.49 | **2.48** | ~2.1–2.3 |
+| GPP at mean LAI 2.8–3.6 | 2,056 (2.00×) | **1,219 (1.19×)** | — |
+
+**The structural error estimate for the thesis is ≈ 1.2×, with its sign
+undetermined**: across defensible canopy bands the residual runs 0.90× to 1.19×,
+so zero is inside the range. It is firmly no longer a factor of two.
+
+**A correction to how the canopy band is read.** Kolari's 3.2 and 2.6 are
+seasonal *maxima*; the diagnostic's `lai_mean` is an annual *mean*, and comparing
+them directly was an error in the previous write-up. Kolari et al. (2009) give
+the seasonal minimum all-sided LAI as 4.5–4.9, projected 1.8–2.0, against maxima
+of 6.0–6.5 all-sided, projected 2.4–2.6 — so the annual mean projected LAI is
+about **2.1–2.3**, and the modelled 2.48 is slightly high rather than low.
+
+The same paper independently corroborates `c_lf`: "the annual turnover of foliage
+was **25% of the maximum of foliage mass each year**", i.e. `c_lf` = 0.25, the
+midpoint of the adopted U(0.20, 0.333).
+
+**The seasonal asymmetry is not fixed and was not expected to be.** October/April
+GPP improved from 0.290 to **0.397** against a measured 0.76 — still 0.52×, with
+**100%** of draws below. Magnitude and seasonal distribution are separate defects
+and only the first responded to the priors. See LIMITATIONS §1a.
+
+
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics
@@ -968,6 +1086,17 @@ published priors and their numbers must stay reproducible, so
 - Kolari, P. (2010). *Dissertationes Forestales* 99, doi 10.14214/df.99.
   Source of the projected LAI convention and site value, the third Rh estimate,
   the spring/autumn asymmetry, the 2002 thinning and the Vaccinium site type.
+- Fox, A. et al. (2009). The REFLEX project: comparing different algorithms and
+  implementations for the inversion of a terrestrial ecosystem model against
+  eddy covariance data. *Agricultural and Forest Meteorology* 149, 1597–1615.
+  Table 4 `a1` range and §4.5. **Not read in full.**
+- Carvalhais, N. et al. (2008). Implications of the carbon cycle steady state
+  assumption for biogeochemical modeling performance and inverse parameter
+  retrieval. *Global Biogeochemical Cycles* 22, GB2007. **Not read in full.**
+- Kolari, P. et al. (2009). CO2 exchange and component CO2 fluxes of a boreal
+  Scots pine forest. *Boreal Environment Research* 14, 761–783. Paper V of the
+  dissertation. **Verified against the full paper** for the chamber-based
+  photosynthetic capacity, the LAI seasonal range and the 25% foliage turnover.
 - Liski, J. and Westman, C. J. (1995). Cited via Kolari (2010) for the absence
   of soil carbon trend over a rotation. **Not read directly.**
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux

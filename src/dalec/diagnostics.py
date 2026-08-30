@@ -92,6 +92,7 @@ from dalec.parameters import (
     DalecParameters,
     allocation_concentration,
     canopy_bounds,
+    derive_initial_pools,
     derive_litter_som_pools,
     prior_bounds,
     reference_respiration_rate,
@@ -1452,7 +1453,18 @@ REPARAMETERISED_SAMPLED: Final[tuple[str, ...]] = (
     "theta_lit",
     "theta_som",
 )
-REPARAMETERISED_DERIVED: Final[tuple[str, ...]] = ("rh_ref", "c_lit_0", "c_som_0")
+#: Every initial pool is derived now -- none is left on a generic published
+#: range. The four here come from measured fluxes and turnover rates; c_lit_0 and
+#: c_som_0 come from rh_ref the same way.
+REPARAMETERISED_DERIVED: Final[tuple[str, ...]] = (
+    "rh_ref",
+    "c_lab_0",
+    "c_fol_0",
+    "c_roo_0",
+    "c_woo_0",
+    "c_lit_0",
+    "c_som_0",
+)
 
 
 def reparameterised_bounds(t_air: np.ndarray | None = None) -> dict[str, tuple[float, float]]:
@@ -1553,6 +1565,20 @@ def sample_reparameterised_parameters(
     # Allocation is no longer flat: the concentration comes from the site's own
     # measured foliage, fine-root and wood fluxes.
     weights = rng.dirichlet(allocation_concentration(), size=n_draws)
+
+    # The remaining initial pools follow from measured fluxes and turnover, so
+    # no initial state is left on a generic published range. c_lab_0 needs the
+    # labile/foliar split, which lives in the simplex weights.
+    lab_index = ALLOCATION_WEIGHT_ORDER.index("f_lab")
+    fol_index = ALLOCATION_WEIGHT_ORDER.index("f_fol")
+    draws.update(
+        derive_initial_pools(
+            draws["c_lf"],
+            draws["theta_roo"],
+            weights[:, lab_index],
+            weights[:, fol_index],
+        )
+    )
 
     scalar_names = [*untouched, *REPARAMETERISED_SAMPLED, *REPARAMETERISED_DERIVED]
     model_names = [n for n in scalar_names if n in PARAMETER_REGISTRY]

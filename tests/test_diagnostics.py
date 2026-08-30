@@ -42,9 +42,12 @@ from dalec.parameters import (
     DAYS_PER_YEAR,
     F_SOM_BOUNDS,
     LITTER_RESIDENCE_TIME_YEARS,
+    NEEDLE_LITTERFALL_G_C_M2,
     PARAMETER_REGISTRY,
+    POOL_STATE_PARAMETERS,
     SOIL_CARBON_STOCK_G_C_M2,
     SOM_RESIDENCE_TIME_YEARS,
+    TREE_CARBON_STOCK_G_C_M2,
     canopy_bounds,
     decomposition_multiplier,
     derive_litter_som_pools,
@@ -1142,9 +1145,9 @@ class TestSampleReparameterisedParameters:
         _, frame = sample_reparameterised_parameters(
             4096, rng=np.random.default_rng(5), t_air=t_air
         )
-        # lma and c_lf are deliberately NOT in this list: they take canopy
+        # lma, c_lf and ceff are deliberately NOT in this list: they take canopy
         # overrides, asserted separately below.
-        for name in ("ceff", "theta_woo", "temperature_exponent", "cr_onset"):
+        for name in ("theta_woo", "temperature_exponent", "cr_onset", "theta_min"):
             lower, upper = prior_bounds(name)
             assert frame[name].min() >= lower
             assert frame[name].max() <= upper
@@ -1166,10 +1169,19 @@ class TestSampleReparameterisedParameters:
         for name, (lower, upper) in canopy.items():
             assert frame[name].min() >= lower
             assert frame[name].max() <= upper
-            # strictly inside the published range, which is the point
+            assert prior_bounds(name) != (lower, upper)
+
+        # lma and c_lf narrow inside the published range.
+        for name in ("lma", "c_lf"):
             published_lower, published_upper = prior_bounds(name)
-            assert (published_lower, published_upper) != (lower, upper)
+            lower, upper = canopy[name]
             assert published_lower <= lower and upper <= published_upper
+
+        # ceff does NOT: REFLEX U(5, 20) extends below DALEC2's U(10, 100).
+        # That is the point of adopting it, so it is asserted rather than
+        # allowed to look like a narrowing.
+        assert canopy["ceff"][0] < prior_bounds("ceff")[0]
+        assert canopy["ceff"][1] < prior_bounds("ceff")[1]
 
     def test_allocation_follows_the_measured_fluxes_not_a_flat_dirichlet(self, t_air):
         """The flat simplex sent 24% of GPP to foliage; measurement says 15%.
@@ -1195,6 +1207,39 @@ class TestSampleReparameterisedParameters:
             assert frame[name].min() >= lower
             assert frame[name].max() <= upper
             assert frame[name].max() - frame[name].min() > 0.5 * (upper - lower)
+
+    def test_every_initial_pool_is_derived_from_a_measured_flux(self, t_air):
+        """No initial state may be left on a generic published range.
+
+        Initial-state error biases parameters and inflates confidence intervals
+        (REFLEX section 4.5; Carvalhais et al. 2008), so the pools are derived
+        from measured fluxes and turnover rather than sampled independently.
+        """
+        _, frame = sample_reparameterised_parameters(
+            1024, rng=np.random.default_rng(31), t_air=t_air
+        )
+        for name in POOL_STATE_PARAMETERS:
+            assert name in REPARAMETERISED_DERIVED, name
+            assert name in frame.columns
+
+    def test_the_tree_pools_sum_to_the_measured_tree_carbon_stock(self, t_air):
+        """c_woo_0 is the remainder, so the total is pinned by construction."""
+        _, frame = sample_reparameterised_parameters(
+            512, rng=np.random.default_rng(32), t_air=t_air
+        )
+        total = (
+            frame["c_lab_0"] + frame["c_fol_0"]
+            + frame["c_roo_0"] + frame["c_woo_0"]
+        )
+        assert np.allclose(total, TREE_CARBON_STOCK_G_C_M2)
+
+    def test_foliar_carbon_reproduces_the_measured_litterfall(self, t_air):
+        """c_lf * c_fol_0 must return the litterfall the pool was derived from."""
+        _, frame = sample_reparameterised_parameters(
+            512, rng=np.random.default_rng(33), t_air=t_air
+        )
+        litterfall = frame["c_lf"] * frame["c_fol_0"]
+        assert np.allclose(litterfall, NEEDLE_LITTERFALL_G_C_M2[1])
 
     def test_allocation_still_closes(self, t_air):
         params, _ = sample_reparameterised_parameters(

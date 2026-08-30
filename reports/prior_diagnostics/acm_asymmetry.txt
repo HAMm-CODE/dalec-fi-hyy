@@ -1,7 +1,7 @@
 ==========================================================================
   Item 3 -- the ACM spring/autumn asymmetry test
 ==========================================================================
-  block 1997-2010, 40 draws, seed 20260809
+  block 1997-2010, 60 draws, seed 20260809
   Kolari (2010): October GPP = 0.76 x April GPP
   at 3.5 degC April against 4.1 degC October
 
@@ -14,33 +14,33 @@
     gpp_dt   April  1.88   October  1.40   ratio 0.747
 
   Modelled October / April GPP ratio:
-    median 0.286    IQR 0.277 to 0.295    5-95% 0.274 to 0.321
+    median 0.397    IQR 0.348 to 0.459    5-95% 0.326 to 0.538
     measured (Kolari)  0.760
-    modelled / measured = 0.38x
+    modelled / measured = 0.52x
     draws below the measured ratio: 100.0%
 
 ==========================================================================
   Item 4 -- does the modelled foliage notice the 2002 thinning?
 ==========================================================================
   median modelled c_fol by year, g C m-2:
-    1997     1497.3
-    1998     1579.8
-    1999     1490.8
-    2000     1394.2
-    2001     1283.2
-    2002     1194.0   <- thinning, ~19% of leaf area removed
-    2003     1161.8
-    2004     1128.7
-    2005     1109.2
-    2006     1099.8
-    2007     1095.0
-    2008     1077.3
-    2009     1052.8
-    2010     1041.0
+    1997      562.4
+    1998      529.7
+    1999      486.8
+    2000      448.4
+    2001      409.7
+    2002      371.3   <- thinning, ~19% of leaf area removed
+    2003      338.1
+    2004      307.1
+    2005      277.1
+    2006      250.7
+    2007      231.2
+    2008      212.7
+    2009      193.9
+    2010      176.8
 
-  change into 2002: -89.3 g C m-2
-  mean absolute year-to-year change: 47.8 g C m-2
-  ratio 1.87  (a real 19% step would stand well clear of the background)
-  a 19% drop would be about -243.8 g C m-2
+  change into 2002: -38.3 g C m-2
+  mean absolute year-to-year change: 29.7 g C m-2
+  ratio 1.29  (a real 19% step would stand well clear of the background)
+  a 19% drop would be about -77.8 g C m-2
 
   -> reports\prior_diagnostics\acm_asymmetry.csv
