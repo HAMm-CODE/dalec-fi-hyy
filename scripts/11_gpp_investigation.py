@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Why is prior predictive GPP 2.3x the measured value?
+"""Prior predictive GPP against the measured range.
 
 Check 3 of the reparameterised respiration prior failed with a wrong-signed
 median annual NEE. The respiration prior was not the cause: the Theta
@@ -98,7 +98,8 @@ def main() -> int:
         )
         if classify_prior_draw(output) is not None:
             continue
-        lai = output.pools[:, 1] / parameters.lma
+        # pools[0] is the initial state; drop it to align with the days.
+        lai = output.pools[1:, 1] / parameters.lma
         rows.append(
             {
                 "draw": index,
@@ -142,7 +143,8 @@ def main() -> int:
     lai_q = np.percentile(table["lai_mean"], [5, 50, 95])
     print(f"  mean LAI   median {lai_q[1]:.2f}   5-95% {lai_q[0]:.2f} to {lai_q[2]:.2f}")
     print(f"  peak LAI   median {np.median(table['lai_max']):.2f}")
-    print("  FI-Hyy projected LAI is about 3 (provisional, DECISIONS.md section 6)")
+    print("  SMEAR II seasonal maximum PROJECTED LAI: 3.2 before the 2002 thinning,")
+    print("  2.6 after (Kolari 2010, all-sided 8.0 and 6.5 over a 2.5 ratio)")
 
     print("\n" + bar)
     print("  GPP by ceff decile -- is ceff the lever?")

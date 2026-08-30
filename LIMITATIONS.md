@@ -34,6 +34,46 @@ under GPP for much of the year.
   in evergreen forests exposed to high sunlight and below-freezing spring
   temperature. They add a temperature sensitivity. **Get the full citation.**
 
+### 1a. The mechanism, and a direct measurement of the gap
+
+**The mechanism is delayed temperature acclimation of photosynthetic capacity.**
+Kolari (2010), Dissertationes Forestales 99, reports October GPP at SMEAR II
+averaging **76% of April GPP** over 1997–2007, at nearly equal monthly mean
+temperatures — 3.5 °C April against 4.1 °C October. Capacity in autumn is still
+high, carried over from summer; in spring it has not yet recovered. ACM has no
+state variable for capacity, so it cannot produce this.
+
+**Verified against our own data before use.** The site's partitioned products
+over the calibration block give October/April ratios of **0.705** (`gpp_nt`) and
+**0.747** (`gpp_dt`), bracketing Kolari's 0.76. The driver temperatures match too:
+3.61 °C April against 4.02 °C October.
+
+**The test, and the result** (`scripts/12_acm_asymmetry.py`, 150 draws):
+
+| | October / April GPP |
+|---|---:|
+| measured (Kolari) | **0.76** |
+| measured (`gpp_nt` / `gpp_dt`) | 0.705 / 0.747 |
+| **modelled, median** | **0.290** |
+| modelled IQR | 0.274 – 0.331 |
+| ratio modelled / measured | **0.38×** |
+| draws below the measured ratio | **97.2%** |
+
+**The model gets autumn productivity wrong by a factor of about 2.6**, and it is
+not a tail effect: 97.2% of draws fall below the measured ratio and the IQR does
+not come close to it.
+
+**Why it fails in this direction is the substantive point.** April and October
+have almost identical mean temperature, but April irradiance is **12.95** against
+October's **3.09** — a factor of 4.2. ACM is radiation-driven, so it predicts a
+ratio near the irradiance ratio of 0.24; the model's 0.29 is close to exactly
+that. The real canopy achieves 0.76 *despite* one quarter the light, because its
+photosynthetic capacity is still summer-acclimated.
+
+So the limitation is not that ACM misses a modest autumn deficit. **It is that
+ACM misses a large autumn enhancement**, and reproduces the radiation ratio
+instead of the observed one. This is the quantitative form of the entry above.
+
 **Our position.** Do not implement the fix. It adds parameters, which directly
 worsens the identifiability question RQ3 asks about. Cite both papers, state the
 limitation, quantify it with the shoulder-season diagnostic
@@ -403,6 +443,38 @@ reads the raw column directly.
 **Not investigated.** Whether the same pattern appears in other years, at other
 sites, or in other releases. §12's cutoff and this one are both artefacts of the
 same product and release, but nothing here establishes a common cause.
+
+---
+
+## 14. The stand was thinned in 2002, inside the calibration window
+
+**What it is.** Kolari (2010) records a thinning at SMEAR II in early 2002 that
+removed about **19% of the leaf area** — all-sided seasonal maximum LAI falls from
+~8.0 to ~6.5, projected 3.2 to 2.6. The calibration block is 1997–2010, so the
+event sits five years into fourteen.
+
+**Why it matters.** DALEC has no management event. Carbon leaves the foliar pool
+only through the phenology term, and there is no mechanism by which a fifth of
+the canopy disappears in one winter. The model must therefore represent a stand
+whose canopy stepped down partway through as a single stationary canopy.
+
+**What the model does instead.** The modelled foliar trajectory shows nothing at
+2002 — measured, not assumed; see `scripts/12_acm_asymmetry.py`. The step is
+absorbed into whatever stationary canopy best fits the whole block, so the
+posterior will describe a compromise between the pre- and post-thinning stand
+rather than either.
+
+**Consequence for the inference.** The calibration and prediction blocks straddle
+different canopies: 1997–2001 at projected LAI ~3.2, 2002 onward at ~2.6. Since
+the prediction block (2011–2014) is entirely post-thinning while the calibration
+block is 64% post-thinning, the held-out forward run is being asked to predict a
+canopy the calibration only partly saw. This is a **structural** contribution to
+prediction error, not a parameter one.
+
+**Not fixed.** Adding a management event means a discontinuity in the state, which
+breaks the smoothness NUTS needs. The alternative — restricting calibration to
+2002–2010 — costs five of fourteen years and is a live option, but the year blocks
+are locked (DECISIONS §1) and this is a supervision question.
 
 ---
 

@@ -45,6 +45,7 @@ from dalec.parameters import (
     PARAMETER_REGISTRY,
     SOIL_CARBON_STOCK_G_C_M2,
     SOM_RESIDENCE_TIME_YEARS,
+    canopy_bounds,
     decomposition_multiplier,
     derive_litter_som_pools,
     prior_bounds,
@@ -1141,11 +1142,58 @@ class TestSampleReparameterisedParameters:
         _, frame = sample_reparameterised_parameters(
             4096, rng=np.random.default_rng(5), t_air=t_air
         )
-        for name in ("ceff", "lma", "theta_woo", "temperature_exponent", "cr_onset"):
+        # lma and c_lf are deliberately NOT in this list: they take canopy
+        # overrides, asserted separately below.
+        for name in ("ceff", "theta_woo", "temperature_exponent", "cr_onset"):
             lower, upper = prior_bounds(name)
             assert frame[name].min() >= lower
             assert frame[name].max() <= upper
             # and it is actually spread over the range, not pinned
+            assert frame[name].max() - frame[name].min() > 0.5 * (upper - lower)
+
+    def test_the_canopy_parameters_take_their_site_informed_bounds(self, t_air):
+        """lma and c_lf override the registry; the registry itself is untouched.
+
+        The published lma prior admits 10 g C m-2, thinner than any conifer
+        needle, and the published c_lf spans needle lifespans of 1 to 8 years.
+        Both are replaced inside this sampler only, so Tasks 1 and 2 stay
+        reproducible against sample_prior_parameters.
+        """
+        _, frame = sample_reparameterised_parameters(
+            2048, rng=np.random.default_rng(21), t_air=t_air
+        )
+        canopy = canopy_bounds()
+        for name, (lower, upper) in canopy.items():
+            assert frame[name].min() >= lower
+            assert frame[name].max() <= upper
+            # strictly inside the published range, which is the point
+            published_lower, published_upper = prior_bounds(name)
+            assert (published_lower, published_upper) != (lower, upper)
+            assert published_lower <= lower and upper <= published_upper
+
+    def test_allocation_follows_the_measured_fluxes_not_a_flat_dirichlet(self, t_air):
+        """The flat simplex sent 24% of GPP to foliage; measurement says 15%.
+
+        That excess drove the LAI feedback, so it is asserted rather than left
+        to inspection.
+        """
+        _, frame = sample_reparameterised_parameters(
+            4096, rng=np.random.default_rng(22), t_air=t_air
+        )
+        foliar_share = (frame["f_lab"] + frame["f_fol"]).median()
+        assert 0.12 < foliar_share < 0.18
+        # wood should now dominate, as it does in a 45-year-old stand
+        assert frame["f_woo"].median() > frame["f_roo"].median()
+        assert frame["f_woo"].median() > foliar_share
+
+    def test_the_superseded_sampler_still_uses_the_published_priors(self, t_air):
+        """Tasks 1 and 2 are stated against it; their numbers must not move."""
+        del t_air
+        _, frame = sample_prior_parameters(2048, rng=np.random.default_rng(23))
+        for name in ("lma", "c_lf"):
+            lower, upper = prior_bounds(name)
+            assert frame[name].min() >= lower
+            assert frame[name].max() <= upper
             assert frame[name].max() - frame[name].min() > 0.5 * (upper - lower)
 
     def test_allocation_still_closes(self, t_air):

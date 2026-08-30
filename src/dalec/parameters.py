@@ -48,14 +48,20 @@ import numpy as np
 from scipy.optimize import brentq
 
 __all__ = [
+    "ALLOCATION_CONCENTRATION",
     "ALLOCATION_PARAMETERS",
     "ALLOCATION_WEIGHT_ORDER",
+    "ALL_SIDED_TO_PROJECTED",
     "ANNUAL_LITTER_INPUT_G_C_M2",
     "ANNUAL_RH_G_C_M2",
     "DAYS_PER_YEAR",
     "EMPIRICAL_TEMPERATURE_EXPONENT",
     "F_SOM_BOUNDS",
+    "LAI_IS_PROJECTED",
     "LITTER_RESIDENCE_TIME_YEARS",
+    "MEASURED_ALLOCATION_G_C_M2",
+    "NEEDLE_LITTERFALL_G_C_M2",
+    "NEEDLE_LONGEVITY_YEARS",
     "PARAMETER_NAMES",
     "PARAMETER_REGISTRY",
     "PHENOLOGY_PARAMETERS",
@@ -63,14 +69,19 @@ __all__ = [
     "POOL_STATE_PARAMETERS",
     "RESPIRATION_REFERENCE_TEMPERATURE_C",
     "SIMPLEX_PARAMETERS",
+    "SITE_PROJECTED_LAI",
     "SOIL_CARBON_STOCK_G_C_M2",
     "SOM_RESIDENCE_TIME_YEARS",
     "TURNOVER_PARAMETERS",
     "DalecParameters",
     "Parameter",
+    "allocation_concentration",
     "allocation_fractions",
+    "canopy_bounds",
     "decomposition_multiplier",
     "derive_litter_som_pools",
+    "foliar_carbon_from_litterfall",
+    "leaf_mass_per_area_bounds",
     "phenology_psi_f",
     "prior_bounds",
     "reference_respiration_rate",
@@ -621,6 +632,61 @@ EMPIRICAL_TEMPERATURE_EXPONENT: Final[float] = 0.0366
 LITTER_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (1.0, 5.0)
 SOM_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (24.0, 61.0)
 
+#: Leaf area index convention that ACM expects: **projected** (one-sided).
+#:
+#: Not an assumption -- two independent lines of evidence from the fitted
+#: coefficients themselves. Chuter B4 half-saturates canopy quantum yield at
+#: ``L = sqrt(a9)``, which is 1.45 for Loobos and 1.03 for Oregon; on an
+#: all-sided basis those would be 0.6 and 0.4, far below where any canopy's light
+#: capture saturates. And both sets were fitted with ``lma_reference`` near 110
+#: g C m-2, which is a projected-basis needle mass for pine -- all-sided it would
+#: be about 44. So ``lma`` here is leaf carbon per unit **projected** leaf area.
+LAI_IS_PROJECTED: Final[bool] = True
+
+#: Conifer all-sided to projected leaf area ratio, dimensionless. Used only to
+#: convert Kolari's published all-sided LAI to the projected basis ACM needs.
+ALL_SIDED_TO_PROJECTED: Final[float] = 2.5
+
+#: Seasonal maximum **projected** LAI at SMEAR II, dimensionless, as
+#: (after thinning, before thinning). Kolari (2010) Dissertationes Forestales 99
+#: gives all-sided ~8.0 before the 2002 thinning and ~6.5 after, a 19% reduction;
+#: dividing by :data:`ALL_SIDED_TO_PROJECTED` gives 3.2 and 2.6.
+#:
+#: **This is the source of the previously unsourced "~3"**, and it also settles
+#: the convention: the site value is projected.
+SITE_PROJECTED_LAI: Final[tuple[float, float]] = (2.6, 3.2)
+
+#: Measured annual carbon flows at FI-Hyy used to set the allocation prior,
+#: g C m-2 yr-1. Ilvesniemi et al. (2009) Fig. 6, all measured, none fitted:
+#:
+#:     foliage    needle litterfall            154
+#:     fine root  below-ground tree litter      90
+#:     wood       above-ground net growth 180-240 plus below-ground 34-69
+#:
+#: At steady state allocation equals turnover, so these are allocation fluxes.
+#: They sum to about 0.49 of GPP ~ 1030, which is (1 - f_auto) at f_auto ~ 0.51 --
+#: independently inside the published f_auto prior, and a useful consistency
+#: check on the whole picture.
+MEASURED_ALLOCATION_G_C_M2: Final[dict[str, float]] = {
+    "foliage": 154.0,
+    "fine_root": 90.0,
+    "wood": 261.0,
+}
+
+#: Total Dirichlet concentration for the allocation simplex. Sets how tightly the
+#: prior holds the measured shares. 20 gives a standard deviation on the foliar
+#: share of about 0.10, wide enough to contain the Fig. 6 spread without pinning
+#: the allocation to a point. The superseded flat Dirichlet is concentration 4.
+ALLOCATION_CONCENTRATION: Final[float] = 20.0
+
+#: Measured above-ground needle litterfall, g C m-2 yr-1, as (low, mean, high).
+#: Ilvesniemi et al. (2009): annual average 154, Fig. 6 range 142-204.
+NEEDLE_LITTERFALL_G_C_M2: Final[tuple[float, float, float]] = (142.0, 154.0, 204.0)
+
+#: Scots pine needle longevity in southern Finland, years, as (low, high). Sets
+#: ``c_lf``, the annual leaf fall fraction, as its reciprocal.
+NEEDLE_LONGEVITY_YEARS: Final[tuple[float, float]] = (3.0, 5.0)
+
 #: SOM share of total heterotrophic respiration, dimensionless, as (low, high).
 #: Boreal heterotrophic respiration is dominated by the humus and mineral soil
 #: rather than by fresh litter, but not overwhelmingly so. A judgement, not a
@@ -779,3 +845,102 @@ def derive_litter_som_pools(
     if np.any(lit_rate <= 0.0) or np.any(som_rate <= 0.0):
         raise ValueError("turnover rates must be strictly positive")
     return (1.0 - share) * rh / lit_rate, share * rh / som_rate
+
+
+def foliar_carbon_from_litterfall(
+    litterfall: np.ndarray | float, c_lf: np.ndarray | float
+) -> np.ndarray:
+    """Steady-state foliar carbon, g C m-2.
+
+    At steady state the foliage loses what it gains, so ``C_fol = litterfall /
+    c_lf``: the stock a measured litterfall implies given a leaf lifespan.
+    """
+    fall = np.asarray(litterfall, dtype=float)
+    rate = np.asarray(c_lf, dtype=float)
+    if np.any(rate <= 0.0) or np.any(rate > 1.0):
+        raise ValueError("c_lf must lie in (0, 1]")
+    return fall / rate
+
+
+def leaf_mass_per_area_bounds(
+    litterfall: tuple[float, float, float] = NEEDLE_LITTERFALL_G_C_M2,
+    longevity: tuple[float, float] = NEEDLE_LONGEVITY_YEARS,
+    projected_lai: float = SITE_PROJECTED_LAI[1],
+) -> tuple[float, float]:
+    """``lma`` bounds implied by measured litterfall, longevity and LAI.
+
+    ``lma = C_fol / LAI_projected`` with ``C_fol = litterfall / c_lf``. Every
+    input is measured at the site; nothing is solved back from a target GPP.
+
+    The **mean** litterfall is used, not the Fig. 6 range. That range is
+    inter-annual and spatial spread in a quantity whose average is the better
+    estimate; multiplying its extremes by the longevity extremes compounds two
+    uncertainties and gives a needlessly wide 133-319 g C m-2. Holding litterfall
+    at 154 isolates the longevity uncertainty, which is the one that matters.
+
+    With litterfall 154 g C m-2 yr-1, longevity 3-5 yr and projected LAI 3.2,
+    ``C_fol`` spans 462-770 and ``lma`` spans 144-241 g C m-2, adopted as 145-240.
+    """
+    _low_fall, mean_fall, _high_fall = litterfall
+    low_life, high_life = longevity
+    return (
+        mean_fall * low_life / projected_lai,
+        mean_fall * high_life / projected_lai,
+    )
+
+
+def allocation_concentration(
+    measured: dict[str, float] | None = None,
+    total: float = ALLOCATION_CONCENTRATION,
+) -> np.ndarray:
+    """Dirichlet concentration over :data:`ALLOCATION_WEIGHT_ORDER`.
+
+    Built from the site's measured allocation fluxes rather than left flat. The
+    flat Dirichlet sends 24% of GPP to foliage and labile where the measured
+    needle litterfall implies 15%, and that excess drives a feedback -- more leaf
+    area gives more GPP gives more foliar allocation -- which ran modelled LAI to
+    a 95th percentile of 48 against a site value near 3.
+
+    The labile and foliar weights are set equal: DALEC's labile pool exists to
+    feed foliage at bud burst, so the measurement constrains their sum, not the
+    split between them.
+
+    Returns
+    -------
+    Concentrations ordered as ``ALLOCATION_WEIGHT_ORDER``, summing to ``total``.
+    """
+    flows = dict(MEASURED_ALLOCATION_G_C_M2 if measured is None else measured)
+    net_primary = sum(flows.values())
+    if net_primary <= 0.0:
+        raise ValueError("measured allocation fluxes must be positive")
+    share = {name: value / net_primary for name, value in flows.items()}
+    half_foliage = 0.5 * share["foliage"]
+    weights = {
+        "f_lab": half_foliage,
+        "f_fol": half_foliage,
+        "f_roo": share["fine_root"],
+        "f_woo": share["wood"],
+    }
+    return np.array([total * weights[name] for name in ALLOCATION_WEIGHT_ORDER])
+
+
+def canopy_bounds() -> dict[str, tuple[float, float]]:
+    """Site-informed bounds for the two canopy parameters, overriding Table 1.
+
+    ``lma`` U(145, 240) g C m-2, from :func:`leaf_mass_per_area_bounds`. The
+    published U(10, 400) admits 10 g C m-2, thinner than any conifer needle.
+
+    ``c_lf`` U(0.20, 0.333), the reciprocal of a 3-5 year needle longevity. The
+    published U(0.125, 1.0) spans lifespans of 1 to 8 years, and its upper half
+    has an evergreen shedding its needles inside eighteen months.
+
+    **These are deliberately not written into the registry.** Tasks 1 and 2 are
+    stated against the published priors and their numbers must stay reproducible,
+    so the override lives with the sampler that uses it.
+    """
+    low_life, high_life = NEEDLE_LONGEVITY_YEARS
+    lower, upper = leaf_mass_per_area_bounds()
+    return {
+        "lma": (round(lower), round(upper)),
+        "c_lf": (1.0 / high_life, 1.0 / low_life),
+    }

@@ -477,11 +477,13 @@ Flagged here so they cannot quietly become fact:
 - `site.latitude_deg` is `61.8474`. Still to be confirmed against site metadata:
   a latitude error is silent, and day length is what carries the seasonal cycle
   of photosynthesis at 62 N.
-- The target projected LAI of ≈ 3 for FI-Hyy is provisional pending a citation
-  from the SMEAR II literature.
-- `lma = 110` g C m⁻² is Chuter's Loobos reference value, used as a working value
-  in the gate re-run. It is a sampled parameter, not a constant, and the Loobos
-  figure is not a FI-Hyy measurement.
+- ~~The target projected LAI of ≈ 3~~ **RESOLVED**: Kolari (2010) gives all-sided
+  seasonal maximum ~8.0 before the 2002 thinning and ~6.5 after, which over a
+  2.5 all-sided-to-projected ratio is projected 3.2 and 2.6. See §8.
+- ~~`lma = 110` g C m⁻², Chuter's Loobos reference value~~ **RESOLVED**: `lma`
+  now takes U(144, 241) g C m⁻² derived from measured needle litterfall,
+  longevity and projected LAI. See §8. The Loobos 110 is retained only as
+  coefficient-set provenance.
 - `F_SOM_BOUNDS`, the SOM share of heterotrophic respiration, U(0.5, 0.9). A
   judgement about boreal soils, not a measurement. It is now the only unsourced
   input to the respiration prior: τ7 records sources for everything else.
@@ -589,6 +591,20 @@ not — agree at this site. That is a second corroboration, not a nuisance.
 With the fix the inversion is exact: realised annual Rh matches the sampled
 `rh_annual` to within 6×10⁻¹⁴ g C m⁻² yr⁻¹ on every draw.
 
+**A third, independent estimate agrees.** Kolari (2010) gives heterotrophic
+respiration as 35–40% of total ecosystem respiration at the 75-year-old stand,
+about half the soil CO₂ efflux. With Re ≈ 850 g C m⁻² yr⁻¹ that is **300–340**,
+inside `rh_annual`'s U(290, 370). Three routes now agree on the same quantity:
+
+| route | estimate, g C m⁻² yr⁻¹ | assumes steady state? |
+|---|---:|---|
+| litter mass balance (Ilvesniemi) | 280, realised 299.8 | yes |
+| girdling split of soil efflux (Ilvesniemi Fig. 6) | 290–370 | no |
+| share of Re (Kolari 2010) | 300–340 | no |
+
+Two of the three make no equilibrium assumption, which is what makes the
+agreement worth something.
+
 `M` remains the **mean of the exponential**, never `exp` of the mean. `exp` is
 convex, the FI-Hyy daily temperature has sd 9.4 °C, and the gap is 5.6%:
 M = 1.2406 against a naive 1.1715 at Θ = 0.0366. The naive form would inflate
@@ -685,6 +701,21 @@ the mass-balance figure the prior previously used. More Rh means a more positive
 NEE. The corrections were made for correctness of sourcing, not to improve
 Check 3, and **Check 3 cannot improve while GPP is wrong** — see below.
 
+**Site type, and the right comparison row.** All Kolari study sites are
+**Vaccinium type** (Cajander classification), Scots pine dominant. The correct
+Viskari Table 4 row is therefore **VT_SP**, measured SOC **5.73 kg C m⁻²
+(SD 0.71)** — not CT_SP, which was the wrong forest type. Against it:
+
+| | g C m⁻² |
+|---|---:|
+| derived `c_som_0`, median | **5,784** |
+| VT_SP measured SOC | **5,730 ± 710** |
+
+The derived median sits 54 g C m⁻² from the measured mean, well inside one
+standard deviation. **This is a consistency check, not independent validation**:
+the measured soil stock informs τ_som and therefore `c_som_0`, so the same
+measurement cannot also test it. It confirms the arithmetic, not the science.
+
 Check 1 is no longer an independent validation; see the subsection above.
 
 ### Why check 3 fails: GPP, not respiration
@@ -734,6 +765,16 @@ them makes the litter input an upper bound on Rh rather than an estimate of it.
 an attribution of a *measured* soil CO₂ efflux between root respiration and
 decomposition, via girdling. It makes no steady-state assumption at all.
 
+**Kolari (2010) makes the steady-state relation defensible here.** He reports no
+trend in soil carbon stock across the chronosequence, and that changes over a
+rotation are generally very small, citing Liski and Westman (1995). So using a
+steady-state relation to inform the *soil* prior is sound at this site even
+though the *stand* is plainly not at equilibrium: the accumulation goes into tree
+biomass, which the paper puts at 242 g C m⁻² yr⁻¹, and not into the soil.
+
+The distinction matters and is easy to blur. **The stand is not at equilibrium;
+the soil approximately is.** The prior only ever needed the second.
+
 What remains is second-order: the initial pools are set to their steady-state
 values while the true pools are slowly growing. The accumulation attributable to
 soil is what would size that error, and the paper states soil carbon accumulation
@@ -760,6 +801,148 @@ reproducible.
 
 ---
 
+## 8. The canopy: LAI convention, `lma`, `c_lf` and allocation
+
+**Decided 2026-08-28.** Source: **Kolari, P. (2010). Dissertationes Forestales 99,
+doi 10.14214/df.99**, with the allocation fluxes from Ilvesniemi et al. (2009)
+Fig. 6. Supersedes the published priors on `lma` and `c_lf` and the flat
+Dirichlet on allocation, for the reparameterised sampler only.
+
+### The LAI convention is projected, and this is now settled
+
+**ACM expects projected (one-sided) LAI**, so `lma` is leaf carbon per unit
+projected leaf area. This was assumed throughout the code but never established;
+two independent lines of evidence from the fitted coefficients settle it.
+
+1. **Where quantum yield saturates.** Chuter B4 is
+   `E_0 = a7·L²/(L² + a9)`, half-saturating at `L = sqrt(a9)`: **1.45** for
+   Loobos, **1.03** for Oregon. On an all-sided basis those become 0.58 and 0.41,
+   far below where any canopy's light capture saturates. On a projected basis
+   they are exactly where it does.
+2. **What the sets were fitted with.** Both carry `lma_reference` ≈ **110**
+   g C m⁻². That is a projected-basis needle mass for pine; all-sided it would be
+   about 44, which no conifer has.
+
+Recorded as `LAI_IS_PROJECTED`. Anyone changing `lma` must check they are on this
+basis, because the error is a silent factor of 2.5.
+
+### The site value, and the end of the unsourced "≈ 3"
+
+Kolari gives the **seasonal maximum all-sided** LAI at SMEAR II as ~8.0 before
+the 2002 thinning and ~6.5 after, a 19% reduction. Over the conifer all-sided to
+projected ratio of ~2.5:
+
+| | all-sided | **projected** |
+|---|---:|---:|
+| before 2002 | 8.0 | **3.2** |
+| after 2002 | 6.5 | **2.6** |
+
+**This is the source of the ≈ 3 that DECISIONS §6 carried as provisional**, and
+it also tells us that figure is projected. Removed from §6.
+
+### `lma` — derived, not fitted
+
+```
+C_fol = needle litterfall / c_lf          = 154 / (1/5 .. 1/3)  = 462 .. 770
+lma   = C_fol / LAI_projected             = 462..770 / 3.2      = 144 .. 241
+```
+
+Adopted **U(144, 241) g C m⁻²**, against the published U(10, 400) which admits
+10 g C m⁻², thinner than any conifer needle. Every input is measured; nothing is
+solved back from a target GPP.
+
+The **mean** litterfall of 154 is used rather than the Fig. 6 range of 142–204.
+That range is inter-annual and spatial spread in a quantity whose average is the
+better estimate, and multiplying its extremes by the longevity extremes compounds
+two uncertainties into a needlessly wide 133–319. Holding litterfall at its mean
+isolates the longevity uncertainty, which is the one that matters.
+
+The pairing is slightly inconsistent and is recorded as such: litterfall 154 is a
+multi-year average spanning the 2002 thinning, while LAI 3.2 is the pre-thinning
+value. Using the block-weighted projected LAI of 2.81 — five years at 3.2 and
+nine at 2.6 — would give 164–274 instead. The two overlap across most of their
+range and the difference is not material at this stage.
+
+### `c_lf` — needle longevity
+
+Scots pine in southern Finland retains 3–5 needle age classes, so
+`c_lf = 1/longevity` gives **U(0.20, 0.333)**. The published U(0.125, 1.0) spans
+lifespans of 1 to 8 years and its upper half has an evergreen conifer shedding
+its needles inside eighteen months.
+
+**Direction matters here.** `c_lf` correlates *negatively* with GPP (−0.628), so
+tightening it alone more than doubles the steady-state foliar pool and makes the
+GPP overestimate worse. It is only safe alongside the allocation constraint
+below, which cuts the inflow. Applied together, never separately.
+
+### Allocation — a Dirichlet concentration from measured fluxes
+
+The flat Dirichlet sent **24.0%** of GPP to foliage and labile where the measured
+needle litterfall over GPP implies **15.0%**, and that excess drove a feedback —
+more leaf area gives more GPP gives more foliar allocation — which ran modelled
+LAI to a 95th percentile of 48.
+
+At steady state allocation equals turnover, so Fig. 6's measured flows are
+allocation fluxes:
+
+| pool | measured flux, g C m⁻² yr⁻¹ | share of NPP |
+|---|---:|---:|
+| foliage | 154 (needle litterfall) | 0.306 |
+| fine root | 90 (below-ground litter) | 0.178 |
+| wood | 261 (growth, 180–240 above + 34–69 below) | 0.516 |
+
+These sum to 505, which over GPP ≈ 1030 is 0.49 — that is `1 - f_auto` at
+`f_auto` ≈ 0.51, **independently inside the published f_auto prior**. A useful
+consistency check that the picture holds together.
+
+The concentration is these shares times a total of 20, giving a standard
+deviation on the foliar share near 0.10: informative without pinning allocation
+to a point. Labile and foliar weights are set equal, because DALEC's labile pool
+exists to feed foliage at bud burst and the measurement constrains their sum, not
+the split.
+
+Realised in the sampler: foliar share median **0.144** against the measured
+0.150, fine root **0.081** against 0.087, wood **0.250** against 0.253.
+
+### What the canopy priors did to GPP, and what it proved
+
+Measured, not predicted: applying §8 made prior predictive GPP **worse**, from a
+median of 2,570 to **2,972** g C m⁻² yr⁻¹ against a measured 952–1104, with mean
+LAI rising from 5.09 to 7.49.
+
+The mechanism is arithmetic. Steady-state LAI is `share/(c_lf·lma) · GPP`; the
+coefficient goes from 0.00208 to 0.00281, a 35% rise, because cutting `c_lf` by
+53% outweighs cutting allocation by 40%. The two were applied together, as
+required, and together they still point the wrong way.
+
+**The priors are nonetheless correct, and this is the point.** At the *measured*
+GPP of 1030 the new coefficient implies LAI **2.89**, against Kolari's measured
+3.2 before thinning and 2.6 after. The old priors implied 2.14. What the priors
+pin is the ratio LAI/GPP; they cannot pin the level, because ACM sets GPP from
+LAI in the other direction.
+
+**That isolates the residual.** Among draws sitting at the measured leaf area
+(mean LAI 2.8–3.6) the median GPP is **2,056 against 1,030 — ACM is 2.00× too
+productive at the correct canopy.** With LIMITATIONS §1a's October/April ratio of
+0.290 against a measured 0.76, the ACM bias is now measured twice, in magnitude
+and in seasonal distribution.
+
+`ceff`'s correlation with GPP rose from +0.241 to +0.707 once the canopy was
+pinned, so the earlier claim that it is a weak lever was true of the old prior
+only. It still cannot reach the measured range: the lowest decile gives 1,898,
+1.85× too high. **Do not fit it** — that would bury a factor of two of structural
+error in a canopy-efficiency parameter.
+
+Full analysis in `reports/prior_diagnostics/FINDINGS_gpp.md`.
+
+### Not written into the registry, deliberately
+
+`lma` and `c_lf` keep their registry names but take these bounds inside
+`sample_reparameterised_parameters` only. Tasks 1 and 2 are stated against the
+published priors and their numbers must stay reproducible, so
+`sample_prior_parameters` and the registry are untouched.
+
+
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics
@@ -782,5 +965,10 @@ reproducible.
   Trofymow, J. A., Sevanto, S. and Liski, J. (2009). Leaf litter decomposition —
   estimates of global variability based on Yasso07 model. *Ecological Modelling*
   220, 3362–3371. Table 1 AWEN rates; source of τ_lit.
+- Kolari, P. (2010). *Dissertationes Forestales* 99, doi 10.14214/df.99.
+  Source of the projected LAI convention and site value, the third Rh estimate,
+  the spring/autumn asymmetry, the 2002 thinning and the Vaccinium site type.
+- Liski, J. and Westman, C. J. (1995). Cited via Kolari (2010) for the absence
+  of soil carbon trend over a rotation. **Not read directly.**
 - Pastorello, G. et al. (2020). The FLUXNET2015 dataset and the ONEFlux
   processing pipeline. *Scientific Data* 7, 225.

@@ -1,162 +1,123 @@
-# Why prior predictive GPP is 2.5× the measured value
+# GPP: the canopy priors are now right, and GPP got worse
 
-`scripts/11_gpp_investigation.py`, 400 draws, seed 20260809, calibration block
-1997–2010. Reference: Ilvesniemi et al. (2009) Fig. 6, GPP (EC) **952–1104**
-g C m⁻² yr⁻¹, verified against the paper.
+`scripts/11_gpp_investigation.py`, 400 draws, seed 20260809, block 1997–2010.
+Measured reference: Ilvesniemi et al. (2009) Fig. 6, GPP (EC) **952–1104**
+g C m⁻² yr⁻¹. Nothing is fitted to it.
 
-Nothing here is fitted. No parameter was tuned to the measured GPP, and this
-script writes no prior.
+## The headline: the fix moved the number the wrong way
 
-## The distribution
+| | before the canopy priors | **after** | measured |
+|---|---:|---:|---:|
+| median annual GPP | 2,570 | **2,972** | 952–1,104 |
+| ratio to measured midpoint | 2.50× | **2.89×** | — |
+| draws inside the measured range | 0.8% | **0.3%** | — |
+| draws above it | 68.3% | **97.7%** | — |
+| mean LAI, median | 5.09 | **7.49** | 3.2 / 2.6 |
 
-| | g C m⁻² yr⁻¹ |
+**This was the risk flagged in advance and it is worth being precise about why it
+landed.** `c_lf` correlates negatively with GPP, so tightening it from a prior
+median of 0.5625 to 0.267 more than doubles the steady-state foliar pool. The
+allocation constraint was supposed to offset that by cutting the inflow from 24%
+of GPP to 15%. It was not enough:
+
+```
+steady-state LAI = share / (c_lf * lma) * GPP      call the coefficient k
+
+  old priors   k = 0.240 / (0.5625 * 205) = 0.00208
+  new priors   k = 0.144 / (0.2670 * 192) = 0.00281      35% larger
+```
+
+Cutting allocation by 40% while cutting `c_lf` by 53% is a net **increase** in
+foliage. The two changes were applied together, as specified, and together they
+still point the wrong way.
+
+## But the priors are not wrong — they are right, and that is the finding
+
+Evaluate the same coefficient at the **measured** GPP:
+
+| | LAI implied at GPP = 1030 |
 |---|---:|
-| prior predictive median | **2,570** |
-| IQR | 542 – 3,162 |
-| 5–95% | 84 – 3,353 |
-| measured (Fig. 6) | 952 – 1,104 |
-| ratio to measured midpoint | **2.50×** |
-| draws inside the measured range | **0.8%** |
-| draws above it | 68.3% |
+| old priors | 2.14 |
+| **new priors** | **2.89** |
+| measured (Kolari 2010) | 3.2 before thinning, 2.6 after |
 
-The prior is not merely wide, it is displaced: two thirds of draws sit above a
-range that fewer than one in a hundred reach.
+**The new canopy priors reproduce the site's measured leaf area almost exactly,
+given the site's measured GPP.** The old ones did not. The priors are correct.
 
-## `ceff` is not the lever
+What they pin is the **ratio** LAI/GPP. They cannot pin the **level**, because
+LAI and GPP are jointly determined: allocation sets LAI from GPP, and ACM sets
+GPP from LAI. Constraining the first relation leaves the second free, and the
+second is where the error lives.
 
-**This overturns the earlier suspicion**, which was that the `ceff` prior
-U(10, 100) drove the overestimate because the GPP gate passed at `ceff` ≈ 11.7
-and Task 2's optimum was ≈ 30.
-
-| `ceff` quintile | median GPP | inside measured |
-|---|---:|---:|
-| 10.5 – 30.5 | 2,216 | 2.5% |
-| 30.5 – 48.3 | 2,333 | 0.0% |
-| 48.3 – 68.6 | 2,517 | 0.0% |
-| 68.6 – 84.8 | 2,932 | 0.0% |
-| 84.8 – 99.8 | 2,934 | 1.3% |
-
-**A tenfold span of `ceff` moves median GPP by 1.32×**, and the bottom quintile
-still overshoots by more than double. Spearman correlation with annual GPP is
-only **+0.241**. ACM's light interception saturates, so once the canopy is dense
-the canopy-efficiency parameter has little left to do. Narrowing `ceff` cannot
-fix this, and fitting it to the measured GPP would buy a number without a
-mechanism.
-
-## Leaf area is the lever
-
-| parameter | Spearman ρ with annual GPP |
-|---|---:|
-| **mean LAI** | **+0.962** |
-| `c_lf` | −0.628 |
-| `lma` | −0.538 |
-| `ceff` | +0.241 |
-| `f_lab` | +0.230 |
-| `f_fol` | +0.139 |
-| `f_auto` | −0.103 |
-| `c_fol_0` | +0.046 |
-
-`c_lf` and `lma` rank where they do precisely because LAI = `C_fol` / `lma` and
-`c_lf` sets the foliage turnover. `c_fol_0` is near zero because the pool
-equilibrates away from its initial value over fourteen years — this is a
-steady-state problem, not an initialisation one.
-
-Modelled LAI, against a site value of about 3 (provisional, DECISIONS §6):
-
-| | |
-|---|---:|
-| mean LAI, median | **5.09** |
-| mean LAI, 5–95% | 0.18 – 48.26 |
-| peak LAI, median | **10.60** |
-
-An upper tail reaching LAI 48 is a runaway, and its mechanism is a **positive
-feedback**: more leaf area → more GPP → more carbon allocated to foliage → more
-leaf area. Nothing in the prior closes that loop.
-
-## The measurable cause: too much carbon goes to foliage
-
-| | share of GPP to foliage + labile |
-|---|---:|
-| prior draws, median | **0.240** |
-| implied by measurement | **0.150** |
-
-The site's measured above-ground needle litterfall is 154 g C m⁻² yr⁻¹ (Fig. 6
-range 142–204) against GPP ≈ 1030. At steady state, allocation to foliage equals
-foliage litterfall, so the measured share is 154/1030 = **0.150**. The flat
-Dirichlet over the four allocation components delivers 0.240 — **60% too much**,
-before the feedback amplifies it.
-
-## What the site's own numbers imply
-
-Steady-state foliar carbon is litterfall / `c_lf`, and LAI is that over `lma`:
-
-| needle longevity | `c_lf` | `C_fol` | LAI at `lma`=150 | LAI at `lma`=205 |
-|---|---:|---:|---:|---:|
-| 3 yr | 0.33 | 462 | 3.1 | 2.3 |
-| 4 yr | 0.25 | 616 | 4.1 | 3.0 |
-| 5 yr | 0.20 | 770 | 5.1 | 3.8 |
-
-Scots pine in southern Finland retains roughly 3–5 needle age classes, so
-`c_lf` ≈ 0.20–0.33 and `lma` ≈ 200 g C m⁻² put LAI at 2.3–3.8 — around the site
-value, and reached without reference to the measured GPP.
-
-## Proposed fix, on physical grounds
-
-Three changes, in the order they matter. **They must go together**; see the
-caveat below.
-
-1. **Constrain allocation to foliage from measured litterfall.** `f_fol + f_lab`
-   should carry 0.13–0.21 of GPP (Fig. 6 litterfall 142–204 over GPP 952–1104),
-   against the flat Dirichlet's 0.240. This attacks the feedback at its source —
-   it limits the *flux* into the foliar pool rather than rescaling the pool
-   afterwards.
-2. **Constrain `c_lf` to needle longevity.** The present U(0.125, 1.0) spans
-   lifespans of 1 to 8 years; its upper half implies an evergreen conifer
-   shedding its needles inside eighteen months. 3–5 years gives 0.20–0.33.
-3. **Narrow `lma` to a physically possible range.** U(10, 400) g C m⁻² admits
-   10 g C m⁻², thinner than any conifer needle. **This one still needs a
-   source** — no Scots pine LMA measurement has been verified for this project,
-   and it must not be set by back-solving from a target LAI.
-
-**The caveat that makes the ordering matter.** `c_lf` correlates *negatively*
-with GPP (−0.628), so change 2 **on its own moves GPP the wrong way**: tightening
-`c_lf` from a prior median of 0.56 down to 0.25 more than doubles the
-steady-state foliar pool. It is only safe alongside change 1, which cuts the
-inflow. Applying the physically correct needle longevity without the allocation
-constraint would make the overestimate substantially worse.
-
-## Priors alone will not close this gap
-
-At the site's own LAI of about 3, the model still produces roughly **1,800**
-g C m⁻² yr⁻¹:
+## ACM is a clean factor of two too productive per unit leaf area
 
 | mean LAI | n | median GPP |
 |---|---:|---:|
-| 0–1 | 103 | 218 |
-| 1–2 | 24 | 921 |
-| 2–3 | 32 | 1,807 |
-| 3–4 | 24 | 2,392 |
-| 4–6 | 29 | 2,698 |
-| 6–10 | 49 | 3,009 |
-| >10 | 133 | 3,240 |
+| 0–2 | 8 | 671 |
+| 2–3 | 20 | 1,904 |
+| 3–4 | 19 | 1,985 |
+| 4–6 | 76 | 2,757 |
+| 6–10 | 174 | 3,019 |
+| >10 | 95 | 3,215 |
 
-The measured 952–1104 corresponds to **LAI ≈ 1–2**, not 3. So even after the
-canopy is corrected, ACM over-predicts by about **1.7×** at the right leaf area.
+Restricted to the draws that actually sit at the measured leaf area:
 
-That residual is a model-structure problem, not a prior problem, and it points at
-two limitations already on the register: ACM has **no temperature limitation on
-photosynthesis at high latitude** (LIMITATIONS §1) and its **coefficients are
-site-calibrated with neither published set boreal** (§2). Correcting the
-allocation priors is necessary and will not be sufficient.
+> **draws with mean LAI 2.8–3.6 (n = 16): median GPP 2,056 against a measured
+> 1,030 — ACM is 2.00× too productive at the right canopy.**
 
-## Open questions
+That is the whole residual, and it is now measured rather than inferred. The
+joint system therefore has no fixed point near the truth: feed LAI 3.2 in and ACM
+returns twice the GPP, which allocation converts back into more leaf area, until
+the prior settles at LAI ≈ 7.5 and GPP ≈ 2,970.
 
-1. **Is the provisional LAI ≈ 3 right?** It is unsourced (DECISIONS §6). The GPP
-   evidence points to an effective LAI nearer 2, but that inference is
-   contaminated by the ACM bias above, so it is not evidence against 3.
-2. **Which `lma`?** The one proposed change with no source behind it.
-3. **Should the allocation constraint be a Dirichlet concentration or a bound?**
-   A concentration keeps the simplex reparameterisation intact and stays
-   differentiable; a hard bound would not.
-4. **Does the ACM residual survive a boreal coefficient set?** Untested, and the
-   cheapest next check on §2.
+## `ceff`: the earlier verdict needs qualifying
+
+| | before | after |
+|---|---:|---:|
+| Spearman ρ with GPP | +0.241 | **+0.707** |
+| median GPP, lowest `ceff` quintile | 2,216 | 2,179 |
+| median GPP, highest quintile | 2,934 | 3,191 |
+
+**`ceff` matters much more than it appeared.** With the canopy loosely determined
+its signal was swamped; with the canopy pinned it is the second-strongest
+predictor. The earlier statement that it moves GPP by only 1.32× across its range
+was true of the old prior and is not true now — it moves it 1.46×.
+
+What has *not* changed is the conclusion: the lowest `ceff` decile still gives
+**1,898**, still **1.85×** the measured midpoint. `ceff` cannot reach the measured
+range from inside its published prior, so narrowing it does not fix this, and
+fitting it to the measured GPP would hide a structural error in a parameter.
+
+## Two independent measurements of the same ACM bias
+
+| test | measured | modelled | gap |
+|---|---:|---:|---:|
+| GPP at the site's leaf area | 1,030 | 2,056 | **2.00×** |
+| October / April GPP ratio | 0.76 | 0.290 | **0.38×** |
+
+The second is LIMITATIONS §1a. Both say ACM's productivity is wrong in a way no
+prior can absorb — too much in absolute terms, and distributed wrongly through
+the season because it tracks radiation instead of acclimated capacity.
+
+## What is left, and what should happen next
+
+1. **`c_fol_0` is now inconsistent with its own steady state.** It still carries
+   the published U(20, 2000), median 1,010, while the canopy priors imply 462–770.
+   The foliar trajectory falls monotonically from 1,497 in 1997 to 1,041 in 2010
+   and is still falling — fourteen years is not long enough to relax. Deriving
+   `c_fol_0` from litterfall and `c_lf`, exactly as `c_lit_0` and `c_som_0` are
+   derived from `rh_ref`, is the obvious completion and was outside this scope.
+2. **The ACM residual is the real blocker** and belongs to LIMITATIONS §1 and §2,
+   not to the priors. It is now quantified twice.
+3. **Do not fit `ceff`.** It would absorb a factor of two of structural error into
+   a canopy-efficiency parameter and make the posterior look healthy while the
+   model stayed wrong.
+
+## What this exercise established
+
+The canopy priors were changed on measured evidence and the headline number got
+worse. That is not a failed change: it converted a vague "GPP is 2.5× too high,
+cause unclear" into a specific, quantified statement — **the allocation and
+canopy parameters are right, and ACM over-produces by a factor of two at the
+correct leaf area.** The prior can no longer be blamed, which is what makes the
+structural problem visible.

@@ -6,41 +6,42 @@
 ==========================================================================
   Prior predictive annual GPP, g C m-2 yr-1
 ==========================================================================
-  median    2,570    IQR 542 to 3,162    5-95% 84 to 3,353
+  median    2,972    IQR 2,536 to 3,163    5-95% 1,556 to 3,267
   measured (Fig. 6)  952 to 1,104
-  median / measured midpoint = 2.50x
-  draws inside the measured range: 0.8%
-  draws above it:                  68.3%
+  median / measured midpoint = 2.89x
+  draws inside the measured range: 0.3%
+  draws above it:                  97.7%
 
 ==========================================================================
   Attribution -- Spearman correlation with annual GPP
 ==========================================================================
-    lai_mean     +0.962
-    c_lf         -0.628
-    lma          -0.538
-    ceff         +0.241
-    f_lab        +0.230
-    f_fol        +0.139
-    cr_fall      -0.115
-    f_auto       -0.103
-    c_fol_0      +0.046
-    d_onset      -0.034
-    cr_onset     -0.012
+    lai_mean     +0.804
+    ceff         +0.707
+    f_fol        +0.402
+    f_lab        +0.397
+    f_auto       -0.300
+    lma          -0.213
+    c_fol_0      +0.208
+    c_lf         -0.189
+    cr_fall      -0.142
+    cr_onset     +0.050
+    d_onset      -0.013
 
 ==========================================================================
   Modelled LAI, and what it should be
 ==========================================================================
-  mean LAI   median 5.09   5-95% 0.18 to 48.26
-  peak LAI   median 10.60
-  FI-Hyy projected LAI is about 3 (provisional, DECISIONS.md section 6)
+  mean LAI   median 7.49   5-95% 2.68 to 14.76
+  peak LAI   median 11.14
+  SMEAR II seasonal maximum PROJECTED LAI: 3.2 before the 2002 thinning,
+  2.6 after (Kolari 2010, all-sided 8.0 and 6.5 over a 2.5 ratio)
 
 ==========================================================================
   GPP by ceff decile -- is ceff the lever?
 ==========================================================================
-    ceff  10.5- 30.5   median GPP   2,216   inside measured   2.5%
-    ceff  30.5- 48.3   median GPP   2,333   inside measured   0.0%
-    ceff  48.3- 68.6   median GPP   2,517   inside measured   0.0%
-    ceff  68.6- 84.8   median GPP   2,932   inside measured   0.0%
-    ceff  84.8- 99.8   median GPP   2,934   inside measured   1.3%
+    ceff  10.5- 30.4   median GPP   2,179   inside measured   1.3%
+    ceff  30.4- 48.1   median GPP   2,859   inside measured   0.0%
+    ceff  48.1- 68.7   median GPP   3,018   inside measured   0.0%
+    ceff  68.7- 85.0   median GPP   3,136   inside measured   0.0%
+    ceff  85.0- 99.8   median GPP   3,191   inside measured   0.0%
 
   -> reports\prior_diagnostics\gpp_investigation.csv

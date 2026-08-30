@@ -90,6 +90,8 @@ from dalec.parameters import (
     PARAMETER_REGISTRY,
     SOM_RESIDENCE_TIME_YEARS,
     DalecParameters,
+    allocation_concentration,
+    canopy_bounds,
     derive_litter_som_pools,
     prior_bounds,
     reference_respiration_rate,
@@ -1484,7 +1486,13 @@ def sample_reparameterised_parameters(
     product happens to be a flux. ``theta_lit`` and ``theta_som`` are still
     sampled, but over residence-time bounds rather than the published ones.
 
-    See DECISIONS.md section 7 for the sources and the derivation.
+    Three further departures from the registry, all site-informed and all
+    documented in DECISIONS.md section 8: ``lma`` and ``c_lf`` take canopy bounds
+    from measured needle mass and longevity, and the allocation simplex takes a
+    Dirichlet concentration from the measured allocation fluxes instead of being
+    flat.
+
+    See DECISIONS.md sections 7 and 8 for the sources and the derivations.
 
     Parameters
     ----------
@@ -1520,7 +1528,14 @@ def sample_reparameterised_parameters(
         if not p.simplex and n not in replaced
     ]
 
-    draws = {name: rng.uniform(*prior_bounds(name), size=n_draws) for name in untouched}
+    # Canopy overrides. lma and c_lf keep their registry names but take
+    # site-informed bounds; see dalec.parameters.canopy_bounds for why they are
+    # not written into the registry itself.
+    canopy = canopy_bounds()
+    draws = {
+        name: rng.uniform(*canopy.get(name, prior_bounds(name)), size=n_draws)
+        for name in untouched
+    }
     draws.update(
         {name: rng.uniform(*bounds[name], size=n_draws) for name in REPARAMETERISED_SAMPLED}
     )
@@ -1535,7 +1550,9 @@ def sample_reparameterised_parameters(
     )
     draws["c_lit_0"] = c_lit_0
     draws["c_som_0"] = c_som_0
-    weights = rng.dirichlet(np.ones(len(simplex_names)), size=n_draws)
+    # Allocation is no longer flat: the concentration comes from the site's own
+    # measured foliage, fine-root and wood fluxes.
+    weights = rng.dirichlet(allocation_concentration(), size=n_draws)
 
     scalar_names = [*untouched, *REPARAMETERISED_SAMPLED, *REPARAMETERISED_DERIVED]
     model_names = [n for n in scalar_names if n in PARAMETER_REGISTRY]
