@@ -1,0 +1,6 @@
+g++ not available, if using conda: `conda install gxx`
+==========================================================================
+  Gradient profile: where the 44x came from
+==========================================================================
+  block 1997-2010, 5113 steps, ARM64, NumbaLinker
+  15 runs after 3 warmups
