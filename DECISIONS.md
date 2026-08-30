@@ -1200,6 +1200,53 @@ convention with it. "No detectable magnitude bias" holds on the hemisurface
 reading and fails on the projected one, where the model under-produces by 34%.
 
 
+## 11. `priors.py`, and what the collapse rate turned out to be
+
+**Built 2026-08-28.** `src/dalec/priors.py` constructs the PyMC prior block by
+reading `dalec.parameters` and nothing else. **No bound is typed in it**; a prior
+can only be changed by changing its recorded source, and `tests/test_priors.py`
+checks each bound against an independent lookup rather than against a copy.
+
+Contents: bounded uniforms from the registry (§1), the canopy overrides `lma`,
+`c_lf` and `ceff` (§8, §9), the four reparameterised respiration parameters (§7),
+the allocation Dirichlet (§8), all six derived initial pools (§7, §9), and the LAI
+convention as a switch that changes `lma` and nothing else (§10).
+
+`LAI_CONVENTIONS` maps hemisurface to 2.0 and projected to (π+2)/2 = 2.5708. The
+site LAI is now recorded **all-sided**, as Kolari published it, and `lai_divisor`
+raises on an unknown name rather than defaulting — a silently wrong divisor is a
+29% error in `lma`. The superseded working divisor of 2.5, which is neither
+convention, is kept only to explain the `lma` bounds recorded in §8.
+
+### The 60% collapse rate is ours, and it is the allocation Dirichlet
+
+The foliage sustainability condition is
+`R = (f_fol + f_lab)·(dGPP/dLAI)/(lma·c_lf) > 1`. In logs the decomposition is
+exact and additive:
+
+| term | share of Var(log R) |
+|---|---:|
+| **log(f_fol + f_lab)** | **69.2%** |
+| log(dGPP/dLAI) | 15.3% |
+| −log(lma) | **7.9%** |
+| −log(c_lf) | 7.6% |
+
+**The expectation was `lma`. It is not `lma`** — 7.9% against the allocation
+share's 69.2%. Every term enters with unit coefficient, so influence is decided
+by spread, and the allocation share spans **18.6×** where `lma` and `c_lf` span
+1.67× each. Those two are tightly bounded by measurement; the Dirichlet's
+concentration of 20 is a judgement with no measured uncertainty behind it.
+
+**So 64.2% collapsing is a property of one of our priors, not of DALEC's
+published ones.** At the measured central values `R` = 1.112 — the site's own
+canopy is sustainable, and the collapse is a tail of the spread we chose.
+
+Recorded, not acted on: no constraint added, no prior adjusted. Raising the
+concentration is a deliberate decision to take with its justification, not a fix
+to slip into a diagnostic.
+
+---
+
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics

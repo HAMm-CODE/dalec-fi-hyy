@@ -1,0 +1,47 @@
+==========================================================================
+  The foliage sustainability condition
+==========================================================================
+  R = (f_fol + f_lab) * (dGPP/dLAI) / (lma * c_lf),  sustainable if R > 1
+  block 1997-2010, 1200 draws, seed 20260809
+
+==========================================================================
+  Evaluated at LAI = 0.10
+==========================================================================
+    dGPP/dLAI   median    304.8   IQR 248.6 to 344.4
+    R           median    0.842   IQR 0.588 to 1.162
+    prior mass sustainable (R > 1):   35.8%
+    prior mass collapsing  (R < 1):   64.2%
+
+    Var(log R) = 0.2720; contribution of each term
+    term                 variance   share   corr with log R
+    log(f_fol+f_lab)       0.1862   69.2%   +0.836
+    log(dGPP/dLAI)         0.0416   15.3%   +0.392
+    -log(lma)              0.0213    7.9%   +0.282
+    -log(c_lf)             0.0217    7.6%   +0.269
+    (shares are cov(term, log R)/Var(log R); they sum to 100% exactly)
+    check: shares sum to 100.1%
+
+    Collapse rate by tercile of each marginal:
+      lma    low  49.5%   mid  66.8%   high  76.2%   spread  26.7 pts
+      ceff   low  82.2%   mid  63.5%   high  46.8%   spread  35.5 pts
+      c_lf   low  51.7%   mid  64.5%   high  76.2%   spread  24.5 pts
+      share  low  97.2%   mid  73.2%   high  22.0%   spread  75.2 pts
+
+==========================================================================
+  Evaluated at LAI = 2.20
+==========================================================================
+    dGPP/dLAI   median    354.0   IQR 277.8 to 410.5
+    R           median    0.974   IQR 0.675 to 1.362
+    prior mass sustainable (R > 1):   48.3%
+    prior mass collapsing  (R < 1):   51.7%
+
+    Var(log R) = 0.2887; contribution of each term
+    term                 variance   share   corr with log R
+    log(f_fol+f_lab)       0.1862   65.4%   +0.813
+    log(dGPP/dLAI)         0.0582   20.2%   +0.450
+    -log(lma)              0.0213    7.4%   +0.271
+    -log(c_lf)             0.0217    7.1%   +0.260
+    (shares are cov(term, log R)/Var(log R); they sum to 100% exactly)
+    check: shares sum to 100.1%
+
+  -> reports\prior_diagnostics\sustainability_condition.csv

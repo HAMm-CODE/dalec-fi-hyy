@@ -51,13 +51,14 @@ __all__ = [
     "ALLOCATION_CONCENTRATION",
     "ALLOCATION_PARAMETERS",
     "ALLOCATION_WEIGHT_ORDER",
-    "ALL_SIDED_TO_PROJECTED",
     "ANNUAL_LITTER_INPUT_G_C_M2",
     "ANNUAL_RH_G_C_M2",
     "BELOWGROUND_LITTERFALL_G_C_M2",
     "DAYS_PER_YEAR",
+    "DEFAULT_LAI_CONVENTION",
     "EMPIRICAL_TEMPERATURE_EXPONENT",
     "F_SOM_BOUNDS",
+    "LAI_CONVENTIONS",
     "LAI_IS_PROJECTED",
     "LITTER_RESIDENCE_TIME_YEARS",
     "MEASURED_ALLOCATION_G_C_M2",
@@ -72,9 +73,10 @@ __all__ = [
     "REFLEX_CEFF_BOUNDS",
     "RESPIRATION_REFERENCE_TEMPERATURE_C",
     "SIMPLEX_PARAMETERS",
-    "SITE_PROJECTED_LAI",
+    "SITE_ALL_SIDED_LAI",
     "SOIL_CARBON_STOCK_G_C_M2",
     "SOM_RESIDENCE_TIME_YEARS",
+    "SUPERSEDED_ALL_SIDED_TO_PROJECTED",
     "TREE_CARBON_STOCK_G_C_M2",
     "TURNOVER_PARAMETERS",
     "DalecParameters",
@@ -87,10 +89,12 @@ __all__ = [
     "derive_litter_som_pools",
     "foliar_carbon_from_litterfall",
     "implied_root_turnover",
+    "lai_divisor",
     "leaf_mass_per_area_bounds",
     "phenology_psi_f",
     "prior_bounds",
     "reference_respiration_rate",
+    "site_lai",
     "solve_psi",
     "som_residence_time_from_stock",
     "turnover_bounds_from_residence_time",
@@ -649,18 +653,59 @@ SOM_RESIDENCE_TIME_YEARS: Final[tuple[float, float]] = (24.0, 61.0)
 #: be about 44. So ``lma`` here is leaf carbon per unit **projected** leaf area.
 LAI_IS_PROJECTED: Final[bool] = True
 
-#: Conifer all-sided to projected leaf area ratio, dimensionless. Used only to
-#: convert Kolari's published all-sided LAI to the projected basis ACM needs.
-ALL_SIDED_TO_PROJECTED: Final[float] = 2.5
-
-#: Seasonal maximum **projected** LAI at SMEAR II, dimensionless, as
-#: (after thinning, before thinning). Kolari (2010) Dissertationes Forestales 99
-#: gives all-sided ~8.0 before the 2002 thinning and ~6.5 after, a 19% reduction;
-#: dividing by :data:`ALL_SIDED_TO_PROJECTED` gives 3.2 and 2.6.
+#: Divisors taking Kolari's all-sided LAI to the basis ACM is read on.
 #:
-#: **This is the source of the previously unsourced "~3"**, and it also settles
-#: the convention: the site value is projected.
-SITE_PROJECTED_LAI: Final[tuple[float, float]] = (2.6, 3.2)
+#: **Both stay live and neither is adopted** (DECISIONS §10, LIMITATIONS §15).
+#: ACM aggregates SPA, parametrised for a broadleaf stand where projected,
+#: hemisurface and half-total coincide, so no needle geometry entered the
+#: calibration and its own provenance cannot supply the convention. The
+#: calibration is run under both and the difference reported as a sensitivity.
+#:
+#: ``hemisurface`` -- exactly 2, by definition (Chen & Black 1992).
+#: ``projected``   -- 2.5708 for Scots pine (Niinemets et al. 2001), matching
+#:                    bisected-cylinder geometry (pi + 2)/2 (Grace 1987).
+LAI_CONVENTIONS: Final[dict[str, float]] = {
+    "hemisurface": 2.0,
+    "projected": (math.pi + 2.0) / 2.0,
+}
+
+#: Which convention a caller gets if it does not say. Not an adoption: it is the
+#: one with the better physical argument, and every result carries the label.
+DEFAULT_LAI_CONVENTION: Final[str] = "hemisurface"
+
+#: Superseded. The working divisor of 2.5 used before the two conventions were
+#: separated; it is neither of them and is kept only to explain the lma bounds
+#: recorded in DECISIONS §8 as U(144, 241).
+SUPERSEDED_ALL_SIDED_TO_PROJECTED: Final[float] = 2.5
+
+#: Seasonal maximum **all-sided** LAI at SMEAR II, dimensionless, as
+#: (after thinning, before thinning). Kolari (2010) Dissertationes Forestales 99:
+#: ~8.0 before the 2002 thinning and ~6.5 after, a 19% reduction.
+#:
+#: **This is the source of the previously unsourced "~3"**; converting it needs a
+#: convention, which is what :data:`LAI_CONVENTIONS` supplies.
+SITE_ALL_SIDED_LAI: Final[tuple[float, float]] = (6.5, 8.0)
+
+
+def site_lai(convention: str = DEFAULT_LAI_CONVENTION) -> tuple[float, float]:
+    """Seasonal maximum LAI on the requested basis, (after, before) thinning."""
+    divisor = lai_divisor(convention)
+    return tuple(value / divisor for value in SITE_ALL_SIDED_LAI)  # type: ignore[return-value]
+
+
+def lai_divisor(convention: str = DEFAULT_LAI_CONVENTION) -> float:
+    """Divisor taking all-sided LAI to ``convention``.
+
+    Raises rather than defaulting on an unknown name: a silently wrong divisor
+    is a 29% error in ``lma`` and a 37% error in GPP.
+    """
+    try:
+        return LAI_CONVENTIONS[convention]
+    except KeyError:
+        raise KeyError(
+            f"unknown LAI convention {convention!r}; expected one of "
+            f"{sorted(LAI_CONVENTIONS)}"
+        ) from None
 
 #: Measured annual carbon flows at FI-Hyy used to set the allocation prior,
 #: g C m-2 yr-1. Ilvesniemi et al. (2009) Fig. 6, all measured, none fitted:
@@ -895,7 +940,7 @@ def foliar_carbon_from_litterfall(
 def leaf_mass_per_area_bounds(
     litterfall: tuple[float, float, float] = NEEDLE_LITTERFALL_G_C_M2,
     longevity: tuple[float, float] = NEEDLE_LONGEVITY_YEARS,
-    projected_lai: float = SITE_PROJECTED_LAI[1],
+    convention: str = DEFAULT_LAI_CONVENTION,
 ) -> tuple[float, float]:
     """``lma`` bounds implied by measured litterfall, longevity and LAI.
 
@@ -908,15 +953,18 @@ def leaf_mass_per_area_bounds(
     uncertainties and gives a needlessly wide 133-319 g C m-2. Holding litterfall
     at 154 isolates the longevity uncertainty, which is the one that matters.
 
-    With litterfall 154 g C m-2 yr-1, longevity 3-5 yr and projected LAI 3.2,
-    ``C_fol`` spans 462-770 and ``lma`` spans 144-241 g C m-2, adopted as 145-240.
+    ``lma`` depends on the LAI convention and both stay live:
+
+        hemisurface (divisor 2.000)  ->  LAI 4.00  ->  lma 116-193
+        projected   (divisor 2.571)  ->  LAI 3.11  ->  lma 148-247
+
+    The superseded working divisor of 2.5 gave LAI 3.2 and lma 144-241, which is
+    what DECISIONS section 8 records; it is neither convention.
     """
     _low_fall, mean_fall, _high_fall = litterfall
     low_life, high_life = longevity
-    return (
-        mean_fall * low_life / projected_lai,
-        mean_fall * high_life / projected_lai,
-    )
+    lai = SITE_ALL_SIDED_LAI[1] / lai_divisor(convention)
+    return (mean_fall * low_life / lai, mean_fall * high_life / lai)
 
 
 def allocation_concentration(
@@ -954,7 +1002,9 @@ def allocation_concentration(
     return np.array([total * weights[name] for name in ALLOCATION_WEIGHT_ORDER])
 
 
-def canopy_bounds() -> dict[str, tuple[float, float]]:
+def canopy_bounds(
+    convention: str = DEFAULT_LAI_CONVENTION,
+) -> dict[str, tuple[float, float]]:
     """Site-informed bounds for the two canopy parameters, overriding Table 1.
 
     ``lma`` U(145, 240) g C m-2, from :func:`leaf_mass_per_area_bounds`. The
@@ -973,9 +1023,9 @@ def canopy_bounds() -> dict[str, tuple[float, float]]:
     so the override lives with the sampler that uses it.
     """
     low_life, high_life = NEEDLE_LONGEVITY_YEARS
-    lower, upper = leaf_mass_per_area_bounds()
+    lower, upper = leaf_mass_per_area_bounds(convention=convention)
     return {
-        "lma": (round(lower), round(upper)),
+        "lma": (float(round(lower)), float(round(upper))),
         "c_lf": (1.0 / high_life, 1.0 / low_life),
         "ceff": REFLEX_CEFF_BOUNDS,
     }

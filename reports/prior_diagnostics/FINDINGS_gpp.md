@@ -455,3 +455,75 @@ October/April ratio. Check residuals by month.
 2. **The seasonal defect** is the standing GPP problem, LIMITATIONS §1/§1a.
 3. **Task 2 must be re-run** against these priors; its ranking was computed
    against superseded ones.
+
+## The sustainability condition, and what actually drives the 60% collapse
+
+`scripts/16_sustainability_condition.py`, 1200 draws. Foliage at annual
+resolution obeys `dC/dt = (f_fol + f_lab)·GPP(C/lma) − c_lf·C`, so a canopy can
+grow from small `C` when
+
+    R = (f_fol + f_lab) · (dGPP/dLAI) / (lma · c_lf) > 1
+
+Taking logs makes the decomposition exact and additive, so the share of
+`Var(log R)` each term carries is an answer rather than an estimate:
+
+| term | Var | share of Var(log R) | ρ with log R |
+|---|---:|---:|---:|
+| **log(f_fol + f_lab)** | 0.1862 | **69.2%** | +0.836 |
+| log(dGPP/dLAI) | 0.0416 | 15.3% | +0.392 |
+| −log(lma) | 0.0213 | **7.9%** | +0.282 |
+| −log(c_lf) | 0.0217 | 7.6% | +0.269 |
+
+Evaluated at LAI 0.10, which governs whether a bare canopy can grow at all:
+**64.2% of prior mass is collapsing**, matching the 24/40 from the spin-up. At
+LAI 2.20 it is 51.7%, with the same ordering.
+
+Collapse rate by tercile, saying the same thing without the algebra:
+
+| marginal | low | mid | high | spread |
+|---|---:|---:|---:|---:|
+| **allocation share** | 97.2% | 73.2% | **22.0%** | **75.2 pts** |
+| `ceff` | 82.2% | 63.5% | 46.8% | 35.5 pts |
+| `lma` | 49.5% | 66.8% | 76.2% | 26.7 pts |
+| `c_lf` | 51.7% | 64.5% | 76.2% | 24.5 pts |
+
+### It is not `lma`, and it is one of ours
+
+**The expectation was `lma`, on the grounds that it has the weakest support and
+enters directly. That is wrong by a wide margin: `lma` carries 7.9% of the
+variance and the allocation share carries 69.2%.**
+
+The reason is spread, not sensitivity. Every term enters `log R` with unit
+coefficient, so influence is decided by how wide each marginal is:
+
+| marginal | range | multiplicative | sd(log) |
+|---|---|---:|---:|
+| **allocation share** | 0.021 – 0.388 | **18.6×** | **0.431** |
+| `ceff` | 5.01 – 19.99 | 4.0× | 0.389 |
+| `lma` | 144 – 241 | 1.67× | 0.146 |
+| `c_lf` | 0.200 – 0.333 | 1.66× | 0.147 |
+
+`lma` and `c_lf` are both tightly bounded by measurement — 1.7× each. The
+allocation share spans **18.6×**, because a Dirichlet at concentration 20 has
+long tails even with its mean pinned at the measured 0.144.
+
+**So the 60% is not a statement about DALEC's generic priors. It is a property of
+our allocation Dirichlet**, whose concentration was a judgement — "informative
+without pinning allocation to a point" — not a measurement. The measured share
+carries no stated uncertainty; the spread around it is ours.
+
+### The site's own numbers pass the condition
+
+At the measured central values — share 0.150, `lma` 154, `c_lf` 0.267, with
+`dGPP/dLAI` at its prior median of 304.8:
+
+    R = 0.150 × 304.8 / (154 × 0.267) = 1.112  →  sustainable
+
+**The collapse is a tail phenomenon of the prior spread, not a statement that the
+site's canopy is unsustainable in DALEC.** The model can hold the measured
+canopy; most prior draws simply are not the measured canopy.
+
+**No constraint has been added and no prior adjusted.** Raising the Dirichlet
+concentration would cut the collapse rate, and that is a decision to take
+deliberately with its justification recorded, not a fix to slip into a
+diagnostic.
