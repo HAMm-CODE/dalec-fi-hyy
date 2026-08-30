@@ -4,3 +4,47 @@ g++ not available, if using conda: `conda install gxx`
 ==========================================================================
   block 1997-2010, 5113 steps, ARM64, NumbaLinker
   15 runs after 3 warmups
+
+  newton_inside
+    compile            38.5 s
+    forward pass      51.04 ms   (46.12 - 65.33)
+    gradient         178.08 ms   (165.52 - 252.36)
+    ratio              3.49x
+
+  constant_inside
+    compile             5.7 s
+    forward pass      49.15 ms   (45.32 - 63.56)
+    gradient         177.50 ms   (166.05 - 213.03)
+    ratio              3.61x
+
+  hoisted
+    compile            34.3 s
+    forward pass      50.82 ms   (46.79 - 60.65)
+    gradient         185.14 ms   (169.06 - 261.40)
+    ratio              3.64x
+
+==========================================================================
+  Correctness of the fix
+==========================================================================
+  hoisted vs newton_inside, NEE       max abs diff 0.000e+00
+  hoisted vs newton_inside, gradient  max abs diff 0.000e+00
+                                      relative     0.000e+00
+  gradient scale (max |newton_inside|)             2.6655e+09
+
+  constant_inside vs newton_inside, NEE  max abs diff 6.722e-02
+  (this one SHOULD differ -- it freezes psi at its start value and is
+   a timing probe, not a model)
+
+==========================================================================
+  Revised projection
+==========================================================================
+  4 chains x (1000 tune + 1000 draws) x nominal 32 leapfrog steps
+  = 256,000 gradient evaluations
+  mode              gradient    ratio    one run    two conventions
+  newton_inside       178.1 ms    3.49x      12.7 h            25.3 h
+  constant_inside     177.5 ms    3.61x      12.6 h            25.2 h
+  hoisted             185.1 ms    3.64x      13.2 h            26.3 h
+
+  speed-up from hoisting: 0.96x
+  Order of magnitude only: the leapfrog count adapts, and this
+  machine's timings vary 20-30% between runs.
