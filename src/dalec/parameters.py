@@ -63,6 +63,7 @@ __all__ = [
     "LITTER_RESIDENCE_TIME_YEARS",
     "MEASURED_ALLOCATION_G_C_M2",
     "MEASURED_FINE_ROOT_CARBON_G_C_M2",
+    "MEASURED_GPP_G_C_M2",
     "NEEDLE_LITTERFALL_G_C_M2",
     "NEEDLE_LONGEVITY_YEARS",
     "PARAMETER_NAMES",
@@ -88,6 +89,7 @@ __all__ = [
     "derive_initial_pools",
     "derive_litter_som_pools",
     "foliar_carbon_from_litterfall",
+    "foliar_share_range",
     "implied_root_turnover",
     "lai_divisor",
     "leaf_mass_per_area_bounds",
@@ -97,6 +99,7 @@ __all__ = [
     "site_lai",
     "solve_psi",
     "som_residence_time_from_stock",
+    "sourced_allocation_concentration",
     "turnover_bounds_from_residence_time",
 ]
 
@@ -748,11 +751,16 @@ BELOWGROUND_LITTERFALL_G_C_M2: Final[float] = 90.0
 #: as an independent check on the derived ``c_roo_0``.
 MEASURED_FINE_ROOT_CARBON_G_C_M2: Final[float] = 238.0
 
-#: Total Dirichlet concentration for the allocation simplex. Sets how tightly the
-#: prior holds the measured shares. 20 gives a standard deviation on the foliar
-#: share of about 0.10, wide enough to contain the Fig. 6 spread without pinning
-#: the allocation to a point. The superseded flat Dirichlet is concentration 4.
-ALLOCATION_CONCENTRATION: Final[float] = 20.0
+#: Ilvesniemi et al. (2009) Fig. 6 GPP (EC), g C m-2 yr-1. Used with the
+#: litterfall range to propagate an uncertainty onto the foliar allocation share.
+MEASURED_GPP_G_C_M2: Final[tuple[float, float]] = (952.0, 1104.0)
+
+
+#: Total Dirichlet concentration for the allocation simplex, **sourced** from the
+#: measured litterfall and GPP ranges rather than judged. See
+#: :func:`sourced_allocation_concentration`. The superseded flat Dirichlet is
+#: concentration 4 and the superseded judgement value was 20.
+ALLOCATION_CONCENTRATION: Final[float] = 85.65319568891526
 
 #: Measured above-ground needle litterfall, g C m-2 yr-1, as (low, mean, high).
 #: Ilvesniemi et al. (2009): annual average 154, Fig. 6 range 142-204.
@@ -1108,3 +1116,57 @@ def implied_root_turnover(
     range is plausible here, and it is not currently used to narrow it.
     """
     return root_litterfall / (fine_root_carbon * DAYS_PER_YEAR)
+
+
+def foliar_share_range(
+    litterfall: tuple[float, float, float] = NEEDLE_LITTERFALL_G_C_M2,
+    gpp: tuple[float, float] = MEASURED_GPP_G_C_M2,
+) -> tuple[float, float, float]:
+    """Measured foliar share of GPP as ``(low, central, high)``.
+
+    At steady state allocation to foliage equals foliage litterfall, so the
+    share is ``litterfall / GPP`` and both carry Fig. 6 ranges. The extremes
+    pair the smallest litterfall with the largest GPP and vice versa.
+    """
+    low_fall, mid_fall, high_fall = litterfall
+    low_gpp, high_gpp = gpp
+    return (
+        low_fall / high_gpp,
+        mid_fall / (0.5 * (low_gpp + high_gpp)),
+        high_fall / low_gpp,
+    )
+
+
+def sourced_allocation_concentration(
+    litterfall: tuple[float, float, float] = NEEDLE_LITTERFALL_G_C_M2,
+    gpp: tuple[float, float] = MEASURED_GPP_G_C_M2,
+) -> float:
+    """Total Dirichlet concentration implied by the measured share uncertainty.
+
+    **Derived, not chosen.** The Dirichlet marginal of a component group is
+    ``Beta(a_group, a0 - a_group)`` with ``Var(w) = p (1 - p) / (a0 + 1)``, so
+
+        a0 = p (1 - p) / Var(w) - 1
+
+    with ``p`` the measured foliar weight on the simplex and ``Var(w)`` the
+    propagated uncertainty divided through by ``1 - f_auto``, because the
+    simplex is over shares of NPP while the measurement is a share of GPP.
+
+    The Fig. 6 range is treated as **full support** rather than a 95% interval:
+    it is interannual and spatial spread, not a stated confidence interval, and
+    what a fixed parameter needs is the uncertainty in the long-run mean, which
+    is narrower. Reading it as support therefore errs toward a wider prior --
+    a0 = 86 rather than the 115 a 95% reading would give.
+
+    The superseded judgement value was 20, which put only 43.5% of the foliar
+    share inside the measured range against 57.1% here, and which carried 69% of
+    the variance in the foliage sustainability condition (DECISIONS section 11).
+    """
+    low_share, _central, high_share = foliar_share_range(litterfall, gpp)
+    npp_fraction = 1.0 - 0.5 * sum(prior_bounds("f_auto"))
+    sigma_share = (high_share - low_share) / math.sqrt(12.0)
+    variance = (sigma_share / npp_fraction) ** 2
+
+    flows = MEASURED_ALLOCATION_G_C_M2
+    mean_weight = flows["foliage"] / sum(flows.values())
+    return mean_weight * (1.0 - mean_weight) / variance - 1.0

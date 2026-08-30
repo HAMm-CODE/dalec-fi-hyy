@@ -1,0 +1,45 @@
+==========================================================================
+  Sourcing the allocation Dirichlet concentration
+==========================================================================
+  litterfall  142-204 (mean 154)  g C m-2 yr-1   Fig. 6
+  GPP         952-1104 (mid 1028)   g C m-2 yr-1   Fig. 6
+
+  foliar share of GPP = litterfall / GPP
+    low   142/1104 = 0.1286
+    mid   154/1028 = 0.1498
+    high  204/952 = 0.2143
+
+  the simplex is over shares of NPP, so the GPP share is divided by
+  (1 - f_auto) = 0.500 at the prior mean
+    measured foliar weight on the simplex: 0.3050
+
+==========================================================================
+  Implied concentration under two readings of the measured range
+==========================================================================
+  range as full support (uniform)      sd(share) 0.02473  ->  a0 =   85.7
+  range as a 95% interval (+/- 2 sd)   sd(share) 0.02142  ->  a0 =  114.5
+
+  ADOPTED: a0 = 85.7, the more conservative reading.
+  The Fig. 6 range is interannual and spatial spread, not a stated
+  confidence interval, and the quantity a fixed parameter needs is the
+  uncertainty in the LONG-RUN MEAN, which is narrower. Treating the
+  full range as the support therefore errs toward a wider prior.
+  Judgement value was 20; sourced value is 4.3x that.
+
+==========================================================================
+  Consequences -- reported, not targeted
+==========================================================================
+
+  judgement (20)
+    foliar share of GPP  median 0.1431   IQR 0.1061-0.1898   95% 0.0556-0.2947
+    measured 0.1498, range 0.1286-0.2143
+    inside the measured range: 43.5%
+    collapse rate (R < 1):     47.1%
+
+  sourced (86)
+    foliar share of GPP  median 0.1490   IQR 0.1187-0.1828   95% 0.0818-0.2434
+    measured 0.1498, range 0.1286-0.2143
+    inside the measured range: 57.1%
+    collapse rate (R < 1):     42.7%
+
+  Reference: the previously reported collapse rate was 64.2%.

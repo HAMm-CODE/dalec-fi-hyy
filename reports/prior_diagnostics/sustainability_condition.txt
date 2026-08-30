@@ -8,39 +8,39 @@
   Evaluated at LAI = 0.10
 ==========================================================================
     dGPP/dLAI   median    304.8   IQR 248.6 to 344.4
-    R           median    0.842   IQR 0.588 to 1.162
-    prior mass sustainable (R > 1):   35.8%
-    prior mass collapsing  (R < 1):   64.2%
+    R           median    1.059   IQR 0.801 to 1.423
+    prior mass sustainable (R > 1):   55.7%
+    prior mass collapsing  (R < 1):   44.3%
 
-    Var(log R) = 0.2720; contribution of each term
+    Var(log R) = 0.1731; contribution of each term
     term                 variance   share   corr with log R
-    log(f_fol+f_lab)       0.1862   69.2%   +0.836
-    log(dGPP/dLAI)         0.0416   15.3%   +0.392
-    -log(lma)              0.0213    7.9%   +0.282
-    -log(c_lf)             0.0217    7.6%   +0.269
+    log(f_fol+f_lab)       0.0863   51.6%   +0.730
+    log(dGPP/dLAI)         0.0416   23.7%   +0.482
+    -log(c_lf)             0.0217   13.1%   +0.371
+    -log(lma)              0.0204   11.7%   +0.340
     (shares are cov(term, log R)/Var(log R); they sum to 100% exactly)
     check: shares sum to 100.1%
 
     Collapse rate by tercile of each marginal:
-      lma    low  49.5%   mid  66.8%   high  76.2%   spread  26.7 pts
-      ceff   low  82.2%   mid  63.5%   high  46.8%   spread  35.5 pts
-      c_lf   low  51.7%   mid  64.5%   high  76.2%   spread  24.5 pts
-      share  low  97.2%   mid  73.2%   high  22.0%   spread  75.2 pts
+      lma    low  29.5%   mid  43.0%   high  60.5%   spread  31.0 pts
+      ceff   low  70.8%   mid  35.5%   high  26.8%   spread  44.0 pts
+      c_lf   low  28.5%   mid  43.2%   high  61.3%   spread  32.8 pts
+      share  low  79.2%   mid  41.0%   high  12.8%   spread  66.5 pts
 
 ==========================================================================
   Evaluated at LAI = 2.20
 ==========================================================================
     dGPP/dLAI   median    354.0   IQR 277.8 to 410.5
-    R           median    0.974   IQR 0.675 to 1.362
-    prior mass sustainable (R > 1):   48.3%
-    prior mass collapsing  (R < 1):   51.7%
+    R           median    1.222   IQR 0.915 to 1.667
+    prior mass sustainable (R > 1):   68.8%
+    prior mass collapsing  (R < 1):   31.2%
 
-    Var(log R) = 0.2887; contribution of each term
+    Var(log R) = 0.1894; contribution of each term
     term                 variance   share   corr with log R
-    log(f_fol+f_lab)       0.1862   65.4%   +0.813
-    log(dGPP/dLAI)         0.0582   20.2%   +0.450
-    -log(lma)              0.0213    7.4%   +0.271
-    -log(c_lf)             0.0217    7.1%   +0.260
+    log(f_fol+f_lab)       0.0863   47.2%   +0.699
+    log(dGPP/dLAI)         0.0582   30.3%   +0.546
+    -log(c_lf)             0.0217   12.0%   +0.353
+    -log(lma)              0.0204   10.6%   +0.322
     (shares are cov(term, log R)/Var(log R); they sum to 100% exactly)
     check: shares sum to 100.1%
 

@@ -303,7 +303,43 @@ it is in [DECISIONS.md](DECISIONS.md) §3.
 
 ---
 
-## 10. Computational feasibility (UNTESTED — the schedule risk)
+## 10. Computational feasibility — now MEASURED, and it is the schedule risk
+
+**Measured 2026-08-28** on the real model at the real problem size, replacing the
+`timing_spike.py` estimate. `scripts/18_model_equivalence_and_timing.py`, 5113
+steps, 20 runs after 3 warmups, ARM64, NumbaLinker.
+
+| | median | min | max |
+|---|---:|---:|---:|
+| forward pass | **50.7 ms** | 46.3 | 59.8 |
+| gradient | **2,239.6 ms** | 2,078.8 | 2,812.6 |
+
+**The gradient costs 44× the forward pass.** Reverse-mode AD normally costs 2–5×,
+so this is not the expected overhead: the scan's backward pass is far heavier
+than its forward one under Numba. That ratio, not the absolute time, is the thing
+worth attacking if this needs to be faster.
+
+**Projection: ~159 hours of gradient evaluation** for 4 chains × (1000 tune +
+1000 draws) at a nominal 32 leapfrog steps per iteration. Treat it as an order of
+magnitude — the step count adapts, and this machine's timings have been unstable
+across runs by 20–30%.
+
+**This is a schedule risk against a 31 December 2026 submission**, and it is now
+a number rather than an unknown. Options, none taken here: fewer chains, a
+shorter calibration block (which trades against slow-pool identifiability, §1a
+and DECISIONS §11), cluster time, or attacking the 44× ratio directly.
+
+**One thing checked and found not to matter.** The first timing ran on PyTensor's
+default `linker="auto"`, which DECISIONS records as unsafe because it silently
+resolves differently per machine. Re-run through `dalec.compute.compile_function`,
+which pins Numba, the gradient came out at 2,240 ms against 2,496 ms — the same
+number within this machine's run-to-run spread, because `auto` was already
+resolving to `NumbaLinker` here (no C++ compiler present). The pin is still
+correct and the script now uses it; it just was not the explanation.
+
+---
+
+## 10b. The original untested estimate
 
 **What it is.** NUTS must differentiate through a PyTensor `scan` of roughly 1460
 daily steps with 12–23 free parameters. This has not been timed.

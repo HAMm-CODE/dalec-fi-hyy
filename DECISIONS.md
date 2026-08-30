@@ -1241,9 +1241,55 @@ concentration of 20 is a judgement with no measured uncertainty behind it.
 published ones.** At the measured central values `R` = 1.112 — the site's own
 canopy is sustainable, and the collapse is a tail of the spread we chose.
 
-Recorded, not acted on: no constraint added, no prior adjusted. Raising the
-concentration is a deliberate decision to take with its justification, not a fix
-to slip into a diagnostic.
+### The concentration is now sourced, not judged
+
+**Decided 2026-08-28.** The concentration was the last unsourced prior in the
+model, and it carried 69% of the variance above. It is now **derived** from the
+same Fig. 6 ranges that set the mean.
+
+The measured foliar share of GPP is litterfall / GPP, and both carry ranges:
+
+| | value | share |
+|---|---|---:|
+| low | 142 / 1104 | 0.1286 |
+| central | 154 / 1028 | 0.1498 |
+| high | 204 / 952 | 0.2143 |
+
+The Dirichlet marginal of a component group is `Beta(a_group, a0 - a_group)`
+with `Var(w) = p(1-p)/(a0+1)`, so `a0 = p(1-p)/Var(w) - 1`. The simplex is over
+shares of NPP while the measurement is a share of GPP, so the propagated standard
+deviation is divided by `1 - f_auto` = 0.5 at the prior mean.
+
+| reading of the Fig. 6 range | sd(share) | implied `a0` |
+|---|---:|---:|
+| **full support (uniform)** | 0.02473 | **85.7** |
+| 95% interval (±2 sd) | 0.02142 | 114.5 |
+
+**Adopted: `a0` = 85.65**, the more conservative of the two. The Fig. 6 range is
+interannual and spatial spread, not a stated confidence interval, and what a
+fixed parameter needs is the uncertainty in the *long-run mean*, which is
+narrower still. Reading the range as full support therefore errs toward a wider
+prior. Implemented as `sourced_allocation_concentration()`, with the constant
+pinned to its output and a test asserting they agree, so the two cannot drift.
+
+**Consequences, reported and not targeted:**
+
+| | judgement, `a0` = 20 | **sourced, `a0` = 86** | measured |
+|---|---:|---:|---:|
+| foliar share, median | 0.1431 | **0.1490** | 0.1498 |
+| foliar share, 95% | 0.056–0.295 | **0.082–0.243** | 0.129–0.214 |
+| inside the measured range | 43.5% | **57.1%** | — |
+| **collapse rate** | 64.2% | **44.3%** | — |
+| allocation share of Var(log R) | 69.2% | **51.6%** | — |
+
+The sourced value is **4.3× the judgement value**, so the prior tightened. The
+collapse rate falling from 64.2% to 44.3% is a consequence of sourcing, not a
+target: nothing was tuned toward it, and the derivation would have been adopted
+had it come out below 20 and raised the rate instead.
+
+The allocation share remains the largest single contributor at 51.6%, but it no
+longer dominates, and `Var(log R)` fell from 0.2720 to 0.1731. **Every prior in
+the model is now sourced.**
 
 ---
 
