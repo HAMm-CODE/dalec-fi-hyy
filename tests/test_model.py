@@ -249,26 +249,32 @@ class TestGradientPerformance:
 
     Parameters closed over inside a ``pytensor.scan`` defeat loop-invariant code
     motion, so the 24 unrolled Newton steps that solve A9 were being taped at
-    every one of 5113 timesteps. That cost 2,165 ms per gradient against 178 ms
-    once the parameters were passed as explicit ``non_sequences`` -- a 12.2x
-    difference, with bit-for-bit identical output.
+    every one of 5113 timesteps. That cost a gradient-to-forward ratio of 37.6x
+    against 3.5x once the parameters were passed as explicit ``non_sequences``,
+    with bit-for-bit identical output.
 
     Bit-for-bit identical output is exactly why this needs a timing test: no
     correctness test can catch it. A future refactor that reintroduces a closure
     would pass every other test in this file and only show up as a sampling run
     taking six days instead of half of one.
 
-    The threshold is deliberately loose. The measured gradient is ~180 ms and
-    this machine varies 20-30% between runs, so 400 ms is comfortably above the
-    healthy path and far below the 2,165 ms regression it exists to catch.
+    **The assertion is on the ratio, not on wall clock.** An absolute budget was
+    tried first and rejected: it was set on an emulated ARM laptop and would not
+    transfer to a cluster, where it would either pass vacuously on faster
+    hardware or fail spuriously on slower. The ratio is a property of the graph
+    rather than the machine, which is what the test is actually about, and it
+    also cancels whatever else the machine is doing during the run.
+
+    Budget 8x: measured healthy is ~3.5x, reverse-mode normally costs 2-5x, and
+    the regression this exists to catch is 37.6x. Nothing sits near 8x.
     """
 
-    #: Milliseconds. See the class docstring for why this number.
-    BUDGET_MS = 400.0
+    #: Gradient / forward. A graph property, not a hardware one.
+    BUDGET_RATIO = 8.0
     WARMUP = 2
     TIMED = 5
 
-    def test_the_gradient_stays_within_budget(self):
+    def test_the_gradient_to_forward_ratio_stays_within_budget(self):
         import time
 
         import pytensor
@@ -292,25 +298,30 @@ class TestGradientPerformance:
         )
         observed = np.zeros(N_DAYS)
         loss = pt.sum(pt.sqr(graph.nee - observed))
+        forward = pytensor.function([theta], graph.nee, on_unused_input="ignore")
         gradient = pytensor.function(
             [theta], pt.grad(loss, theta), on_unused_input="ignore"
         )
         theta0 = np.array([parameters.to_dict()[name] for name in PARAMETER_NAMES])
 
-        for _ in range(self.WARMUP):
-            gradient(theta0)
-        times = []
-        for _ in range(self.TIMED):
-            start = time.perf_counter()
-            gradient(theta0)
-            times.append(time.perf_counter() - start)
+        def best(function):
+            for _ in range(self.WARMUP):
+                function(theta0)
+            times = []
+            for _ in range(self.TIMED):
+                start = time.perf_counter()
+                function(theta0)
+                times.append(time.perf_counter() - start)
+            # Minimum, not mean: a floor test, least contaminated by noise.
+            return min(times)
 
-        # Minimum, not mean: this is a floor test, and the minimum is the least
-        # contaminated by whatever else the machine is doing.
-        best_ms = 1000.0 * min(times)
-        assert best_ms < self.BUDGET_MS, (
-            f"gradient took {best_ms:.0f} ms at {N_DAYS} steps, budget "
-            f"{self.BUDGET_MS:.0f} ms. The usual cause is a parameter closed "
+        forward_s = best(forward)
+        gradient_s = best(gradient)
+        ratio = gradient_s / forward_s
+        assert ratio < self.BUDGET_RATIO, (
+            f"gradient / forward = {ratio:.1f}x at {N_DAYS} steps "
+            f"({1000 * gradient_s:.0f} ms / {1000 * forward_s:.0f} ms), budget "
+            f"{self.BUDGET_RATIO:.0f}x. The usual cause is a parameter closed "
             "over inside the scan instead of passed via non_sequences; see "
             "DECISIONS.md section 12."
         )

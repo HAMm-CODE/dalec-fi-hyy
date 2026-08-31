@@ -1,0 +1,17 @@
+{
+  "years": [
+    1997,
+    1998
+  ],
+  "convention": "hemisurface",
+  "chains": 2,
+  "tune": 200,
+  "draws": 200,
+  "wall_clock_s": 1217.1893137000006,
+  "divergences": 0,
+  "max_treedepth_hits": 0,
+  "worst_r_hat": 1.0,
+  "lowest_ess_bulk": 230.0,
+  "n_days": 730,
+  "n_assimilated": 622
+}

@@ -1,0 +1,92 @@
+==========================================================================
+  PLUMBING RUN -- machinery check, NOT a result
+==========================================================================
+  block        1997-1998, 730 days, 622 assimilable
+  convention   hemisurface
+  sampling     2 chains, 200 tune, 200 draws
+g++ not available, if using conda: `conda install gxx`
+  machine      ARM64, NumbaLinker
+  model built in 1.6 s; initial logp -28,182.3 (finite)
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (2 chains in 2 jobs)
+NUTS: [f_auto, theta_roo, theta_woo, theta_min, temperature_exponent, d_onset, cr_onset, d_fall, cr_fall, c_lf, lma, ceff, rh_annual, f_som, theta_lit, theta_som, allocation_weights]
+g++ not available, if using conda: `conda install gxx`
+g++ not available, if using conda: `conda install gxx`
+Sampling 2 chains for 200 tune and 200 draw iterations (400 + 400 draws total) took 979 seconds.
+We recommend running at least 4 chains for robust computation of convergence diagnostics
+The rhat statistic is larger than 1.01 for some parameters. This indicates problems during sampling. See https://arxiv.org/abs/1903.08008 for details
+
+==========================================================================
+  Sampling
+==========================================================================
+  wall clock            1217.2 s  (20.3 min)
+  per draw              1521 ms
+  divergences           0 / 400 (0.0%)
+  max treedepth hits    0 / 400
+  tree depth            median 5   max 6
+    chain 0: step size 2.538e-01, divergences 0
+    chain 1: step size 1.641e-01, divergences 0
+
+==========================================================================
+  Convergence, every sampled variable
+==========================================================================
+  variable                         mean    r_hat   ess_bulk   ess_tail
+  f_auto                           0.66    1.000        290        280
+  theta_roo                      0.0097    1.000        290        170
+  theta_woo                     0.00076    1.000        310        320
+  theta_min                      0.0099    1.000        280        110
+  temperature_exponent            0.059    1.000        400        250
+  d_onset                           120    1.000        550        310
+  cr_onset                           19    1.000        390        300
+  d_fall                            180    1.000        610        280
+  cr_fall                            29    1.000        530        280
+  c_lf                             0.33    1.000        460        200
+  lma                               190    1.000        320        310
+  ceff                               20    1.000        420        230
+  rh_annual                         360    1.000        410        210
+  f_som                             0.5    1.000        230        160
+  theta_lit                      0.0027    1.000        230        160
+  theta_som                     0.00011    1.000        440        280
+  allocation_weights[0]            0.93    1.000        340        320
+  allocation_weights[1]          0.0058    1.000        360        290
+  allocation_weights[2]           0.016    1.000        320        290
+  allocation_weights[3]           0.046    1.000        450        330
+  f_lab                            0.31    1.000        380        350
+  f_fol                          0.0019    1.000        360        290
+  f_roo                          0.0053    1.000        320        290
+  f_woo                           0.015    1.000        440        310
+  rh_ref                           0.68    1.000        470        330
+  decomposition_multiplier          1.4    1.000        400        250
+  c_lit_0                           130    1.000        490        280
+  c_som_0                          3100    1.000        440        320
+  c_fol_0                           460    1.000        460        200
+  c_lab_0                           150    1.000        360        290
+  c_roo_0                            25    1.000        290        170
+  c_woo_0                          6200    1.000        440        220
+  c_fol_mean                        600    1.000        310        270
+  gpp_annual                       1600    1.000        310        250
+  nee_annual                       -230    1.000        440        320
+
+  worst r_hat 1.000   lowest ess_bulk 230
+
+==========================================================================
+  Prediction 1: do divergences cluster at particular c_lf values?
+==========================================================================
+  No divergences, so there is nothing to cluster.
+  Consistent with the separatrix prediction: it sits at 30-98 g C m-2
+  while the derived c_fol_0 spans 462-770, so the prior never
+  approaches it (reports/prior_diagnostics/separatrix.txt).
+
+==========================================================================
+  Prediction 2: chains agree on NEE, disagree on c_fol?
+==========================================================================
+  nee_annual   chain means    -226.49     -226.92   |diff|      0.43   pooled sd      1.93   r_hat 1.000
+  c_fol_mean   chain means     603.94      603.65   |diff|      0.29   pooled sd      2.97   r_hat 1.000
+  gpp_annual   chain means    1623.51     1623.15   |diff|      0.37   pooled sd      8.87   r_hat 1.000
+
+  Read: a low r_hat on nee_annual beside a high one on c_fol_mean is
+  the predicted signature. At 200 draws neither is conclusive.
+
+  -> reports\sampling\plumbing_hemisurface.nc
+
+  REMINDER: plumbing only. Not a posterior, not a result.
