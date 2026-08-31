@@ -303,39 +303,58 @@ it is in [DECISIONS.md](DECISIONS.md) §3.
 
 ---
 
-## 10. Computational feasibility — now MEASURED, and it is the schedule risk
+## 10. Computational feasibility — measured, profiled, and no longer the blocker
 
-**Measured 2026-08-28** on the real model at the real problem size, replacing the
-`timing_spike.py` estimate. `scripts/18_model_equivalence_and_timing.py`, 5113
-steps, 20 runs after 3 warmups, ARM64, NumbaLinker.
+**Measured and then profiled, 2026-08-28.** `scripts/18_model_equivalence_and_timing.py`
+and `scripts/19_gradient_profile.py`, 5113 steps, ARM64, NumbaLinker.
 
-| | median | min | max |
-|---|---:|---:|---:|
-| forward pass | **50.7 ms** | 46.3 | 59.8 |
-| gradient | **2,239.6 ms** | 2,078.8 | 2,812.6 |
+| | gradient | ratio to forward | one run | two conventions |
+|---|---:|---:|---:|---:|
+| **before** | 2,165 ms | **37.6×** | 154 h | 308 h |
+| **after** | **178 ms** | **3.5×** | **12.7 h** | **25.3 h** |
 
-**The gradient costs 44× the forward pass.** Reverse-mode AD normally costs 2–5×,
-so this is not the expected overhead: the scan's backward pass is far heavier
-than its forward one under Numba. That ratio, not the absolute time, is the thing
-worth attacking if this needs to be faster.
+**A 12.2× speed-up, and the ratio is now in the normal reverse-mode range.**
+The forward pass is unchanged at ~50 ms; all of it came out of the gradient.
 
-**Projection: ~159 hours of gradient evaluation** for 4 chains × (1000 tune +
-1000 draws) at a nominal 32 leapfrog steps per iteration. Treat it as an order of
-magnitude — the step count adapts, and this machine's timings have been unstable
-across runs by 20–30%.
+### What the cost actually was
 
-**This is a schedule risk against a 31 December 2026 submission**, and it is now
-a number rather than an unknown. Options, none taken here: fewer chains, a
-shorter calibration block (which trades against slow-pool identifiability, §1a
-and DECISIONS §11), cluster time, or attacking the 44× ratio directly.
+The 37× ratio was a graph defect, not hardware. `psi` solves A9 from `c_lf`
+alone, so it is time-invariant, but the 24 unrolled Newton steps were being
+evaluated *and taped for reverse-mode* at every one of 5113 timesteps.
 
-**One thing checked and found not to matter.** The first timing ran on PyTensor's
-default `linker="auto"`, which DECISIONS records as unsafe because it silently
-resolves differently per machine. Re-run through `dalec.compute.compile_function`,
-which pins Numba, the gradient came out at 2,240 ms against 2,496 ms — the same
-number within this machine's run-to-run spread, because `auto` was already
-resolving to `NumbaLinker` here (no C++ compiler present). The pin is still
-correct and the script now uses it; it just was not the explanation.
+Isolated by a cheap probe before anything was changed: freezing `psi` at a
+constant inside the scan — numerically wrong, but a clean timing control —
+dropped the gradient from 2,165 ms to 189 ms and the ratio from 37.6× to 4.06×.
+That located the whole overhead in the Newton chain.
+
+### The fix was not the obvious one
+
+**Hoisting `psi` out of the scan changed nothing**: 2,149 ms against 2,165 ms,
+bit-for-bit identical output. PyTensor pulls a **closed-over** expression back
+into the inner graph, so computing `psi` outside the loop and referring to it
+through a Python closure left it exactly where it was.
+
+**What worked was passing every parameter as an explicit `non_sequences`
+argument.** With the parameters as genuine loop-invariant inputs rather than
+closures over `theta[i]`, PyTensor's loop-invariant code motion hoists the Newton
+chain by itself — the `newton_inside` variant now runs at 178 ms and 3.49×,
+identical to the constant-`psi` control.
+
+**Implicit differentiation through a custom Op is therefore not needed.** It
+would have worked, by removing the taped chain, but it is a great deal of
+machinery for a problem that an argument-passing change solves exactly.
+
+### What this means for the schedule
+
+**159 hours was an upper bound from an unprofiled graph, and it is withdrawn as
+a schedule number.** The projection is now **12.7 hours** for one run and
+**25.3 hours** for the two-convention sensitivity (DECISIONS §10, LIMITATIONS
+§15) — which is what made the ratio worth fixing rather than routing around.
+
+Still an order of magnitude only: the leapfrog count adapts, this machine's
+timings vary 20–30% between runs, and no sampling has been done. But the
+computational risk to a 31 December 2026 submission is now small, and it was the
+graph rather than the hardware.
 
 ---
 
