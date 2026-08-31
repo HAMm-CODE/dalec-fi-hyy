@@ -237,3 +237,80 @@ class TestGraphGuards:
                 frost_threshold_degc=FROST,
                 **drivers,
             )
+
+
+# ---------------------------------------------------------------------------
+# Performance regression
+# ---------------------------------------------------------------------------
+
+
+class TestGradientPerformance:
+    """Guard against the closure regression coming back.
+
+    Parameters closed over inside a ``pytensor.scan`` defeat loop-invariant code
+    motion, so the 24 unrolled Newton steps that solve A9 were being taped at
+    every one of 5113 timesteps. That cost 2,165 ms per gradient against 178 ms
+    once the parameters were passed as explicit ``non_sequences`` -- a 12.2x
+    difference, with bit-for-bit identical output.
+
+    Bit-for-bit identical output is exactly why this needs a timing test: no
+    correctness test can catch it. A future refactor that reintroduces a closure
+    would pass every other test in this file and only show up as a sampling run
+    taking six days instead of half of one.
+
+    The threshold is deliberately loose. The measured gradient is ~180 ms and
+    this machine varies 20-30% between runs, so 400 ms is comfortably above the
+    healthy path and far below the 2,165 ms regression it exists to catch.
+    """
+
+    #: Milliseconds. See the class docstring for why this number.
+    BUDGET_MS = 400.0
+    WARMUP = 2
+    TIMED = 5
+
+    def test_the_gradient_stays_within_budget(self):
+        import time
+
+        import pytensor
+        import pytensor.tensor as pt
+
+        from dalec.parameters import PARAMETER_NAMES
+
+        drivers = _drivers()
+        parameters = _parameters()
+        theta = pt.dvector("theta")
+        named = dict(
+            zip(PARAMETER_NAMES, [theta[i] for i in range(len(PARAMETER_NAMES))],
+                strict=True)
+        )
+        graph = build_forward_graph(
+            parameters=named,
+            latitude_deg=LATITUDE,
+            coefficients=LOOBOS_EVERGREEN,
+            frost_threshold_degc=FROST,
+            **drivers,
+        )
+        observed = np.zeros(N_DAYS)
+        loss = pt.sum(pt.sqr(graph.nee - observed))
+        gradient = pytensor.function(
+            [theta], pt.grad(loss, theta), on_unused_input="ignore"
+        )
+        theta0 = np.array([parameters.to_dict()[name] for name in PARAMETER_NAMES])
+
+        for _ in range(self.WARMUP):
+            gradient(theta0)
+        times = []
+        for _ in range(self.TIMED):
+            start = time.perf_counter()
+            gradient(theta0)
+            times.append(time.perf_counter() - start)
+
+        # Minimum, not mean: this is a floor test, and the minimum is the least
+        # contaminated by whatever else the machine is doing.
+        best_ms = 1000.0 * min(times)
+        assert best_ms < self.BUDGET_MS, (
+            f"gradient took {best_ms:.0f} ms at {N_DAYS} steps, budget "
+            f"{self.BUDGET_MS:.0f} ms. The usual cause is a parameter closed "
+            "over inside the scan instead of passed via non_sequences; see "
+            "DECISIONS.md section 12."
+        )

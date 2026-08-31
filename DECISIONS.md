@@ -1293,6 +1293,84 @@ the model is now sourced.**
 
 ---
 
+## 12. Methods result: closures inside `pytensor.scan` defeat loop-invariant code motion
+
+**Measured 2026-08-28.** Recorded as a methods finding rather than a bug fix,
+because it is not specific to this model and it cost a 12.2× factor that no
+correctness test could have caught.
+
+### The finding
+
+**Parameters closed over inside a `pytensor.scan` are pulled into the inner
+graph, defeating loop-invariant code motion.** In this model `psi` solves
+equation A9 from `c_lf` alone, so it is time-invariant, but the 24 unrolled
+Newton steps that solve it were being evaluated *and taped for reverse-mode* at
+every one of 5113 timesteps.
+
+**Passing the parameters as explicit `non_sequences` recovers the hoisting**,
+which PyTensor then performs by itself. The gradient went from **2,165 ms to 178
+ms — 12.2×** — with **bit-for-bit identical** output.
+
+### The three diagnostic steps
+
+Each one was measured before the next was attempted.
+
+| step | gradient | ratio to forward | what it established |
+|---|---:|---:|---|
+| 1. constant-`psi` control | **189 ms** | **4.06×** | the cost is the Newton chain |
+| 2. hoisted via closure | **2,149 ms** | 43× | PyTensor pulls closures back inside |
+| 3. explicit `non_sequences` | **178 ms** | **3.49×** | matches the control — fixed |
+
+**Step 1 located the cost.** Freezing `psi` at a constant *inside* the scan —
+numerically wrong, but a clean timing control — dropped the ratio from 37.6× to
+4.06×, squarely in the normal reverse-mode range. That put the entire overhead in
+the Newton chain and nowhere else.
+
+**Step 2 refuted the obvious fix.** Computing `psi` outside the scan and
+referring to it through a Python closure changed nothing: 2,149 ms against 2,165
+ms, bit-for-bit identical. Hoisting the *expression* is not enough; what matters
+is how the value crosses the scan boundary.
+
+**Step 3 confirmed the mechanism.** With every parameter passed as an explicit
+`non_sequences` argument rather than closed over as `theta[i]`, the
+`newton_inside` variant — which still writes the Newton solve inside the step
+function — runs at 178 ms and 3.49×, *identical to the constant-`psi` control*.
+That identity is the proof: the chain is now genuinely outside the loop, hoisted
+by PyTensor's own optimiser.
+
+### Implicit differentiation was considered and is not needed
+
+`solve_psi`'s docstring anticipated that a freed `c_lf` "would need implicit
+differentiation through `solve_psi` rather than a baked-in number", and a custom
+`Op` supplying `dpsi/dtheta = -(df/dtheta)/(df/dpsi)` would indeed have removed
+the taped chain — one derivative evaluation regardless of iteration count.
+
+**It is not implemented, because it is not necessary.** An argument-passing
+change achieves the same result exactly, with no custom `Op`, no hand-written
+gradient to keep correct, and no new surface to test. The unrolled Newton is
+kept: exact, differentiable, and now costing one solve per gradient rather than
+5113.
+
+### Why this needs a timing test
+
+The regression is **bit-for-bit invisible**. Every correctness test in the suite
+passed in the slow configuration, because the arithmetic was identical — only the
+graph was wasteful. A future refactor reintroducing a closure would show up
+nowhere except as a sampling run taking six days instead of half of one.
+
+`tests/test_model.py::TestGradientPerformance` asserts the gradient stays under
+400 ms at 5113 steps, marked `pytensor` so it stays out of the fast loop. The
+budget is loose on purpose: ~180 ms measured, 20–30% machine variation, and
+2,165 ms is what it exists to catch.
+
+### Consequence for the schedule
+
+159 hours was withdrawn as a schedule number on the strength of this. The
+projection is now 12.7 h for one run and 25.3 h for the two-convention
+sensitivity (§10, LIMITATIONS §10).
+
+---
+
 ## References
 
 - Bloom, A. A. and Williams, M. (2015). Constraining ecosystem carbon dynamics
