@@ -1,0 +1,52 @@
+=== job ===
+job id       984913
+convention   hemisurface
+cpus         4
+numba cache  /scratch/project_2020170/dalec-numba-cache
+which g++    /projappl/project_2020170/dalec-env/bin/g++
+g++ version  g++ (conda-forge gcc 16.2.0-4) 16.2.0
+which python /projappl/project_2020170/dalec-env/bin/python
+log          results/calibrate_hemisurface_984913.log
+
+==========================================================================
+  DALEC2 CALIBRATION -- FI-Hyy, NEE_VUT_REF only
+==========================================================================
+  block                   1997-2010, 5113 days, 4413 assimilable
+  convention              hemisurface
+  sampling                4 chains, 1000 tune, 1000 draws, 4 cores
+  seed                    20260809
+  NUTS settings           PyMC defaults throughout -- target_accept,
+                          max_treedepth, init and step size are NOT set
+
+==========================================================================
+  Environment
+==========================================================================
+  hostname                rc5128
+  interpreter arch        linux-x86_64
+  hardware arch           x86_64  (x86_64)
+  python                  3.13.15
+  pytensor                3.2.4
+  resolved linker         NumbaLinker
+  pytensor.config.cxx     '/ROIHU_TYKKY_gAAZHzS/miniforge/envs/env1/bin/g++'
+  C backend               available
+
+==========================================================================
+  Graph timing at the real step count
+==========================================================================
+  compile                 8.8 s
+  forward pass            8.89 ms   at 5113 steps
+  gradient                39.34 ms
+  ratio                   4.43x
+  (healthy is 2-5x; the regression this guards against is 37.6x)
+
+==========================================================================
+  Model
+==========================================================================
+  built in                0.2 s
+  initial logp            -142,884.8  (finite)
+
+  Sampling now. This is the long part.
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [f_auto, theta_roo, theta_woo, theta_min, temperature_exponent, d_onset, cr_onset, d_fall, cr_fall, c_lf, lma, ceff, rh_annual, f_som, theta_lit, theta_som, allocation_weights]
+/projappl/project_2020170/dalec-env/bin/python: line 34: 2228470 Killed                  /usr/bin/singularity --silent exec $DIR/../$CONTAINER_IMAGE bash -c "eval \"\$(/ROIHU_TYKKY_gAAZHzS/miniforge/bin/conda shell.bash hook )\"  && conda activate env1 &>/dev/null &&  $_venv_act && exec -a $_O_SOURCE $DIR/python $( test $# -eq 0 || printf " %q" "$@" )"

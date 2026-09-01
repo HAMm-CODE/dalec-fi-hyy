@@ -1,0 +1,190 @@
+=== job ===
+job id       989643
+convention   hemisurface
+cpus         4
+numba cache  /scratch/project_2020170/dalec-numba-cache
+which g++    /projappl/project_2020170/dalec-env/bin/g++
+g++ version  g++ (conda-forge gcc 16.2.0-4) 16.2.0
+which python /projappl/project_2020170/dalec-env/bin/python
+log          results/calibrate_hemisurface_989643.log
+
+==========================================================================
+  DALEC2 CALIBRATION -- FI-Hyy, NEE_VUT_REF only
+==========================================================================
+  block                   1997-2010, 5113 days, 4413 assimilable
+  convention              hemisurface
+  sampling                4 chains, 1000 tune, 1000 draws, 4 cores
+  seed                    20260809
+  NUTS settings           PyMC defaults throughout -- target_accept,
+                          max_treedepth, init and step size are NOT set
+
+==========================================================================
+  Environment
+==========================================================================
+  hostname                rc4143
+  interpreter arch        linux-x86_64
+  hardware arch           x86_64  (x86_64)
+  python                  3.13.15
+  pytensor                3.2.4
+  resolved linker         NumbaLinker
+  pytensor.config.cxx     '/ROIHU_TYKKY_gAAZHzS/miniforge/envs/env1/bin/g++'
+  C backend               available
+
+==========================================================================
+  Graph timing at the real step count
+==========================================================================
+  compile                 8.9 s
+  forward pass            9.05 ms   at 5113 steps
+  gradient                40.06 ms
+  ratio                   4.43x
+  (healthy is 2-5x; the regression this guards against is 37.6x)
+
+==========================================================================
+  Model
+==========================================================================
+  built in                0.6 s
+  initial logp            -142,884.8  (finite)
+
+  Sampling now. This is the long part.
+Initializing NUTS using jitter+adapt_diag...
+Multiprocess sampling (4 chains in 4 jobs)
+NUTS: [f_auto, theta_roo, theta_woo, theta_min, temperature_exponent, d_onset, cr_onset, d_fall, cr_fall, c_lf, lma, ceff, rh_annual, f_som, theta_lit, theta_som, allocation_weights]
+Sampling 4 chains for 1_000 tune and 1_000 draw iterations (4_000 + 4_000 draws total) took 13850 seconds.
+There was 1 divergence after tuning. Increase `target_accept` or reparameterize.
+The rhat statistic is larger than 1.01 for some parameters. This indicates problems during sampling. See https://arxiv.org/abs/1903.08008 for details
+The effective sample size per chain is smaller than 100 for some parameters.  A higher number is needed for reliable rhat and ess computation. See https://arxiv.org/abs/1903.08008 for details
+  trace written to        results/calibration_hemisurface.nc
+
+==========================================================================
+  Sampling
+==========================================================================
+  wall clock              13908.9 s  (3.86 h)
+  per draw                1739 ms
+  divergences             1 / 4000  (0.03%)
+  max treedepth hits      0 / 4000
+  tree depth              median 7   max 9
+    chain 0: step size 2.019e-02, divergences 0
+    chain 1: step size 1.920e-02, divergences 1
+    chain 2: step size 3.540e-02, divergences 0
+    chain 3: step size 2.193e-02, divergences 0
+
+==========================================================================
+  Convergence, every variable
+==========================================================================
+  variable                         mean    r_hat   ess_bulk   ess_tail
+  f_auto                           0.69    1.500          7         11
+  theta_roo                      0.0079    1.500          7         11
+  theta_woo                       0.001    1.000       3000       1800
+  theta_min                      0.0072    1.500          7         11
+  temperature_exponent            0.041    1.500          7         11
+  d_onset                           120    1.500          7         11
+  cr_onset                           10    1.000       3500       2200
+  d_fall                            180    1.000       3600       2600
+  cr_fall                           120    1.500          7         11
+  c_lf                             0.33    1.000       2300       1400
+  lma                               190    1.100         19         18
+  ceff                               20    1.100         34        540
+  rh_annual                         370    1.000       2400       1600
+  f_som                            0.53    1.100         22         35
+  theta_lit                     0.00074    1.500          7         11
+  theta_som                     4.5e-05    1.000        100        120
+  allocation_weights[0]            0.56    1.500          7         11
+  allocation_weights[1]         0.00078    1.100         53        150
+  allocation_weights[2]            0.23    1.500          7         11
+  allocation_weights[3]            0.21    1.500          7         11
+  f_lab                            0.17    1.500          7         11
+  f_fol                         0.00024    1.000       1500       1800
+  f_roo                           0.074    1.500          7         11
+  f_woo                           0.064    1.500          7         11
+  rh_ref                           0.79    1.500          7         11
+  decomposition_multiplier          1.3    1.500          7         11
+  c_lit_0                           590    1.500          7         11
+  c_som_0                          9100    1.500          7         11
+  c_fol_0                           460    1.000       2300       1400
+  c_lab_0                           150    1.000       1200       1800
+  c_roo_0                            36    1.500          7         11
+  c_woo_0                          6100    1.500          7         11
+  c_fol_mean                        580    1.500          7         11
+  gpp_annual                       1600    1.500          7         11
+  nee_annual                       -150    1.500          7         11
+
+  worst r_hat 1.500   lowest ess_bulk 7
+  ** r_hat above 1.01: the chains have not mixed. Treat every number
+     below as provisional.
+
+==========================================================================
+  Parameters at prior bounds
+==========================================================================
+  parameter                        mean      lower      upper  position
+  c_lf                           0.3333        0.2     0.3333     1.00  <- AT UPPER BOUND
+  ceff                            19.99          5         20     1.00  <- AT UPPER BOUND
+  cr_fall                           121         20        150     0.78
+  cr_onset                        10.13         10        100     0.00  <- AT LOWER BOUND
+  d_fall                          182.2          1        365     0.50
+  d_onset                           117          1        365     0.32
+  f_auto                         0.6895        0.3        0.7     0.97  <- AT UPPER BOUND
+  f_som                          0.5251        0.5        0.9     0.06
+  lma                               192        116        192     1.00  <- AT UPPER BOUND
+  rh_annual                       369.8        290        370     1.00  <- AT UPPER BOUND
+  temperature_exponent          0.04143      0.018       0.08     0.38
+  theta_lit                    0.000736  0.0005476   0.002738     0.09
+  theta_min                    0.007233      1e-05       0.01     0.72
+  theta_roo                    0.007932     0.0001       0.01     0.79
+  theta_som                   4.545e-05  4.488e-05  0.0001141     0.01  <- AT LOWER BOUND
+  theta_woo                   0.0009986    2.5e-05      0.001     1.00  <- AT UPPER BOUND
+
+  8 of 16 sampled scalars sit within 5% of a bound.
+    upper: c_lf, ceff, f_auto, lma, rh_annual, theta_woo
+    lower: cr_onset, theta_som
+  A posterior pressed against a bound is the prior truncating the
+  answer. Report it as a property of the prior range, not as an
+  estimate of the parameter.
+
+==========================================================================
+  Posterior fluxes against measurement
+==========================================================================
+  convention hemisurface -- a GPP number is not interpretable without it
+
+  GPP        median    1653.2   94% HDI   1611.4 - 1659.7    measured    952-1104    ABOVE
+  Reco       median    1510.3   94% HDI   1450.4 - 1516.4    measured    761-898     ABOVE
+  NEE        median    -143.3   94% HDI   -162.1 - -141.7    observed  -215.8
+
+  Observed annual NEE from this block's assimilable days: -215.8
+  (recorded value -215.8; the modelled scalar averages ALL 5113 days
+   while the observed average is over the 4413 assimilable ones, so the
+   two are close but not a like-for-like comparison.)
+
+==========================================================================
+  RQ3: the pre-sampling prediction
+==========================================================================
+  Recorded before sampling (FINDINGS_gpp.md):
+    CONFIRMED by both gross fluxes biased high by the same absolute
+      amount, leaving NEE right for the wrong reasons.
+    FALSIFIED by GPP near 1,030 and Reco near 850.
+
+  GPP  excess over measured midpoint     +625.2 g C m-2 yr-1
+  Reco excess over measured midpoint     +680.8
+  NEE  error against observed             +72.5
+
+  -> NEITHER cleanly. The numbers above do not match either arm of
+     the prediction as stated; describe what they do show rather
+     than forcing them into one.
+
+  The seasonal half of the prediction -- a systematic autumn deficit and
+  spring surplus in the monthly residuals -- is NOT tested here. It needs
+  monthly posterior-predictive residuals from the saved trace, which is
+  a separate pass. Do not report this verdict as covering it.
+
+==========================================================================
+  Outputs
+==========================================================================
+  trace     results/calibration_hemisurface.nc
+  summary   results/calibration_hemisurface_summary.csv
+  meta      results/calibration_hemisurface_meta.json
+  log       results/calibration_hemisurface.log
+
+=== outputs ===
+trace    results/calibration_hemisurface.nc
+summary  results/calibration_hemisurface_summary.csv
+meta     results/calibration_hemisurface_meta.json
+log      results/calibrate_hemisurface_989643.log

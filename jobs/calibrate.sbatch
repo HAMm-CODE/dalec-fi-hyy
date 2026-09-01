@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16G
+#SBATCH --mem=64G
 #SBATCH --output=jobs/logs/calibrate-%j.out
 #SBATCH --error=jobs/logs/calibrate-%j.err
 #
