@@ -93,11 +93,12 @@ def build_gradient_fn(n_steps: int, n_params: int):
         nee = reco - gpp
         return lab_n, fol_n, roo_n, woo_n, lit_n, som_n, nee
 
-    outputs, _ = pytensor.scan(
+    outputs = pytensor.scan(
         fn=step,
         sequences=[T, I, doy],
         outputs_info=init + [None],
         n_steps=n_steps,
+        return_updates=False,
     )
     nee = outputs[-1]
 

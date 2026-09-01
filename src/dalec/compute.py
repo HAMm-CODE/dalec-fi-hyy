@@ -15,15 +15,25 @@ name, and the resolved linker is read back and asserted.
 
 What is pinned, and why Numba
 -----------------------------
-``numba``. There is no C++ compiler in this environment -- ``config.cxx`` is
-empty and neither g++, clang++ nor cl is on PATH -- so the C backend is not
-available to pin even if it were wanted. Numba is not a fallback in any
-meaningful sense: on the real calibration graph it stays in nopython mode
-throughout, with no op dropping into object mode.
+``numba``. Numba is not a fallback in any meaningful sense: on the real
+calibration graph it stays in nopython mode throughout, with no op dropping into
+object mode.
 
 Pinning rather than leaving ``auto`` also means that adding a compiler to a
 machine later cannot silently move the project onto a different backend and
 change its numbers.
+
+**The justification for the pin is now weaker than it was, and deliberately
+unchanged.** This docstring previously said the C backend was "not available to
+pin even if it were wanted". That is true of the development laptop, where
+``config.cxx`` is empty and no g++ is on PATH. It is **false on Roihu**, where
+``g++`` resolves to the Tykky container's own compiler rather than the system
+GCC, ``config.cxx`` is populated, and the C backend genuinely exists. So on the
+cluster the pin is a *choice between two available backends*, not a statement
+about which ones exist, and a choice wants a measurement behind it.
+
+The pin is not being changed on that basis alone. ``scripts/21_cluster_timing.py``
+times both backends on the real graph; see DECISIONS §13.
 
 The check is lazy, and that is deliberate
 -----------------------------------------

@@ -1369,6 +1369,173 @@ budget is loose on purpose: ~180 ms measured, 20–30% machine variation, and
 projection is now 12.7 h for one run and 25.3 h for the two-convention
 sensitivity (§10, LIMITATIONS §10).
 
+> **Both of those are laptop figures, measured under emulation at a nominal
+> treedepth of 5.** See §13: the interpreter is an emulated x86-64 build on ARM
+> hardware, the cluster is roughly 9x faster, and the projection is restated
+> there against measured treedepths of 6, 7 and 8. The 12.2x speed-up itself is
+> a graph property and is unaffected.
+
+---
+
+## 13. The timing numbers were measured on the wrong machine, and partly on the wrong graph
+
+**Recorded 2026-09-01.** Two independent problems with every timing figure in
+§12 and LIMITATIONS §10. Neither changes a model number; both change the
+schedule, and one of them changes what `dalec.compute`'s pin means.
+
+### Problem 1: the laptop runs an emulated interpreter, and the reports hide it
+
+The development laptop is ARM64 Qualcomm hardware running an **x86-64 (AMD64)
+build of Python under emulation**. Measured here, not assumed:
+
+| probe | value |
+|---|---|
+| `sys.version` | `[MSC v.1929 64 bit (AMD64)]` |
+| `sysconfig.get_platform()` | `win-amd64` |
+| `PROCESSOR_ARCHITECTURE` | `AMD64` |
+| `platform.machine()` | **`ARM64`** |
+| `platform.processor()` | ARMv8, Qualcomm |
+
+**The trap is the fourth row.** `platform.machine()` reports the *hardware*,
+so every report header written by `scripts/18`, `19` and `20` prints
+"ARM64, NumbaLinker" — which reads as a native ARM64 run and is not one. The
+interpreter is x86-64 and emulated. Any figure carrying that header is inflated
+by the emulation layer, and the header is the reason nobody noticed.
+
+`scripts/21_cluster_timing.py` prints interpreter architecture and hardware
+architecture on separate lines and states plainly when they disagree.
+
+### Problem 2: `timing_spike.py` is not the model, and the gap is not a known factor
+
+`timing_spike.py` does still use the closure pattern — `step` closes over
+`c_eff`, `c_lma`, `f_auto` and the rest as slices of `theta`, and its `scan`
+takes no `non_sequences`. In that sense its numbers are "the unfixed graph".
+
+**But the 12.2x from §12 must not be applied to them, in either direction.** That
+factor was the cost of taping the 24-step Newton solve for `psi` at all 5113
+timesteps, and `timing_spike.py` has **no psi solve at all** — its phenology
+inlines fixed constants (`phi_on = 0.02 * exp(...)`). With no large
+loop-invariant chain to hoist, the closure pattern has little to cost it, which
+is consistent with §12 step 2, where hoisting via a closure changed nothing
+(2,149 ms against 2,165 ms).
+
+So the module is a **shape-alike** — right structure, inlined constants,
+different arithmetic — and its timings map onto the real graph by no known
+factor. Anyone holding a `timing_spike.py` number should treat it as
+uninformative about the sampler's cost rather than as a figure to correct. That
+is precisely why the re-timing has to be done with `scripts/21_cluster_timing.py`
+against `dalec.model.build_forward_graph`, and not by rescaling what is already
+in hand.
+
+### The laptop-to-cluster factor
+
+**Roughly 9x, and independent of the graph fix.** *Measured by the user on Roihu;
+not independently reproduced in this session.* Being a hardware-and-emulation
+factor rather than a graph property, it applies to the fixed and unfixed graphs
+alike, which is what makes it usable as a rescaling.
+
+**The 12.7 h projection in §12 and LIMITATIONS §10 is a laptop number.** It was
+measured under emulation at a nominal treedepth of 5 and should be restated for
+the cluster.
+
+**Laptop baseline, re-measured on the fixed graph, 2026-09-01.**
+`scripts/21_cluster_timing.py`, 5113 steps, 15 runs after 3 warmups, full output
+in `reports/sampling/cluster_timing.txt`:
+
+```
+forward pass    50.04 ms      gradient  200.51 ms      ratio  4.01x
+```
+
+The gradient sits at 200.5 ms against §12's 178.1 ms for the same graph — inside
+the 20–30% run-to-run variation this machine has always shown, and the ratio is
+comfortably under the 8x regression budget either way.
+
+| | treedepth 6 | 7 | 8 |
+|---|---:|---:|---:|
+| **laptop, measured**, wall clock (4 chains / 4 cores) | 7.13 h | 14.26 h | 28.52 h |
+| laptop, total gradient-hours | 28.52 | 57.03 | 114.07 |
+| **cluster at 9x**, wall clock | **0.79 h** | **1.58 h** | **3.17 h** |
+| cluster, total gradient-hours | 3.17 | 6.34 | 12.67 |
+
+**The laptop row is measured; the cluster row is arithmetic.** It rescales by a
+factor supplied from elsewhere and assumes the leapfrog count rather than
+observing it. It is here so the schedule has a working number, and it is
+superseded the moment script 21 runs on Roihu.
+
+The plumbing run measured treedepth median 5 / max 6 over two years; a
+fourteen-year record carries more information and should go deeper, so treat 6 as
+optimistic and 8 as the planning case. Even at treedepth 8 on the cluster the
+two-convention sensitivity is a few hours, not a few days — **compute has stopped
+being the constraint on this project**, which is the practical consequence worth
+carrying forward.
+
+### The compiler on Roihu, and what the Numba pin now means
+
+*Supplied by the user; not reproducible from this machine.* On Roihu, `which g++`
+resolves to the **Tykky container's own compiler** at
+
+```
+/projappl/project_2020170/dalec-env/bin/g++
+```
+
+and **not** the system GCC 15.2.0. `pytensor.config.cxx` is therefore populated
+and **the C backend is available**.
+
+That changes the standing of the pin. `dalec.compute` pins Numba, and its
+docstring justified this partly on there being no C++ compiler to pin instead —
+true on the laptop, where `config.cxx` is empty, and false on the cluster. **The
+pin is now a choice between two available backends rather than a statement about
+which exist.**
+
+**The pin is not changed.** It is left exactly as it is, and the docstring is
+corrected to say why the justification is weaker rather than to pretend it still
+holds. What the change licenses is a measurement, not an edit: script 21 times
+**both** backends on the real graph, reads back the resolved linker class for
+each, and refuses to time a backend that did not resolve as asked — PyTensor
+substitutes a slower linker silently, and a substituted `VMLinker` would report a
+number roughly 130x off as though it were a comparison. It also checks the two
+backends agree on NEE and on the gradient, because a speed comparison between
+backends that disagree is not a comparison.
+
+---
+
+## 14. Morris screening, the Task 2 re-run and `theta_roo` are deferred
+
+**Decided 2026-09-01.** Recorded because all three were previously described as
+prerequisites for calibration, and a deferral without its reasoning invites the
+question being reopened every time someone reads the README's phase order.
+
+**The justification for Morris screening was parameter reduction before an
+expensive run, and the run is no longer expensive.** The stated target was
+"reduce 23 parameters to roughly 12-14 before the expensive sampling"
+(`sensitivity.py`). Two things removed the premise: the gradient fix (§12) took
+12.2x out of the cost, and the cluster is roughly 9x the laptop (§13). At
+treedepth 6-8 the calibration is well under an hour to a few hours on Roihu.
+Screening to save a run that costs an hour is not worth its own build.
+
+**Morris is also a prior-side diagnostic that the posterior answers directly and
+better.** It ranks parameters by elementary effects on NEE over the prior; the
+posterior reports what the data actually informed, with the covariance structure
+Morris cannot see. Where the two disagree the posterior is the better witness.
+
+**Task 2's re-run is deferred on the same grounds** — it is one-at-a-time
+sensitivity against the current priors, and the posterior supersedes it.
+
+**`theta_roo` is deferred as a change, not as a finding.** The site's own stock
+and flux pin it at 1.04x10⁻³ d⁻¹, a 2.6 year residence time, against a published
+prior spanning 0.27-27 years, and `c_roo_0` comes out at 0.20x the measured stock
+(§9, `FINDINGS_gpp.md`). That remains **reported and not adopted**: narrowing it
+is a prior change with a recorded justification, and it is not being made
+silently on the way into a calibration run.
+
+**What this costs, stated plainly.** LIMITATIONS §11 defers attribution of the
+41-day over-long growing season to Morris screening — "Do not attribute it to ACM
+before then." Deferring Morris does **not** license attributing it now. The
+question moves to the posterior, and if the posterior cannot separate the
+phenology parameters from ACM, the screening comes back. RQ3's "prior statement
+of what cannot be informed" (LIMITATIONS §4) likewise loses its prior-side half
+and rests on the posterior alone.
+
 ---
 
 ## References

@@ -1,0 +1,61 @@
+==========================================================================
+  Cluster timing: the FIXED graph, both backends
+==========================================================================
+  block 1997-2010, 5113 steps
+  15 runs after 3 warmups
+
+  hostname            Hamza
+  hardware            ARM64  (ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc)
+  interpreter built   win-amd64   (python 3.13.5)
+  ** EMULATED: an x86-64 interpreter on ARM hardware. Timings from
+     this machine are inflated and are not a native measurement.
+     platform.machine() reports the HARDWARE, so a report header
+     reading 'ARM64' here does NOT mean a native ARM64 run.
+  which g++           <not found>
+  g++ --version       <none>
+  pytensor.config.cxx ''
+  C backend           NOT available
+  pytensor            3.2.4
+
+==========================================================================
+  backend: numba
+==========================================================================
+  resolved linker    NumbaLinker
+  compile                36.9 s
+  forward pass          50.04 ms   (45.50 - 61.90)
+  gradient             200.51 ms   (175.91 - 261.91)
+  ratio                  4.01x
+
+==========================================================================
+  backend: cvm
+==========================================================================
+  requested 'cvm' -> resolved 'VMLinker'
+  NOT the requested backend. Skipped rather than timed: PyTensor
+  substitutes a slower linker silently, and timing the
+  substitute would report a number ~130x off as a comparison.
+
+==========================================================================
+  Wall-clock projection for the calibration run
+==========================================================================
+  4 chains x (1000 tune + 1000 draws) = 2000 iterations per chain
+  One gradient per leapfrog step; treedepth d gives 2^d steps per
+  iteration. Wall clock assumes the chains run concurrently on at
+  least 4 physical cores -- with fewer, multiply accordingly.
+
+  numba (200.5 ms per gradient)
+    treedepth   leapfrogs/iter   wall clock   total gradient-hours
+            6               64       7.13 h                28.52 h
+            7              128      14.26 h                57.03 h
+            8              256      28.52 h               114.07 h
+
+  Both LAI conventions doubles the wall clock unless they are run
+  concurrently, which needs twice the cores.
+
+==========================================================================
+  Backends not timed
+==========================================================================
+  cvm: resolved to VMLinker, not a cvm linker.
+
+  NOTE: this supersedes the projection in
+  reports/prior_diagnostics/gradient_profile.txt, which was measured
+  on an emulated x86-64 interpreter on ARM hardware.

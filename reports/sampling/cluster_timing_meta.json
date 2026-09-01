@@ -1,0 +1,53 @@
+{
+  "block": [
+    1997,
+    2010
+  ],
+  "n_days": 5113,
+  "environment": {
+    "hostname": "Hamza",
+    "hardware": "ARM64",
+    "processor": "ARMv8 (64-bit) Family 8 Model 1 Revision 201, Qualcomm Technologies Inc",
+    "interpreter_platform": "win-amd64",
+    "python": "3.13.5",
+    "emulated": true,
+    "pytensor": "3.2.4",
+    "which_gxx": null,
+    "gxx_version": null,
+    "pytensor_config_cxx": ""
+  },
+  "backends": {
+    "numba": {
+      "resolved_linker": "NumbaLinker",
+      "compile_s": 36.85642329999246,
+      "forward_ms": 50.042000017128885,
+      "gradient_ms": 200.50659999833442,
+      "ratio": 4.0067663148895525
+    }
+  },
+  "skipped": {
+    "cvm": "VMLinker"
+  },
+  "design": {
+    "chains": 4,
+    "tune": 1000,
+    "draws": 1000
+  },
+  "projection": {
+    "numba_treedepth_6": {
+      "leapfrogs_per_iteration": 64,
+      "wall_clock_h": 7.129123555496335,
+      "total_gradient_h": 28.51649422198534
+    },
+    "numba_treedepth_7": {
+      "leapfrogs_per_iteration": 128,
+      "wall_clock_h": 14.25824711099267,
+      "total_gradient_h": 57.03298844397068
+    },
+    "numba_treedepth_8": {
+      "leapfrogs_per_iteration": 256,
+      "wall_clock_h": 28.51649422198534,
+      "total_gradient_h": 114.06597688794136
+    }
+  }
+}

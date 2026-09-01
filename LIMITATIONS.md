@@ -305,6 +305,15 @@ it is in [DECISIONS.md](DECISIONS.md) §3.
 
 ## 10. Computational feasibility — measured, profiled, and no longer the blocker
 
+> **⚠ The machine label on this section is wrong, and the schedule numbers are
+> laptop numbers.** "ARM64, NumbaLinker" comes from `platform.machine()`, which
+> reports the *hardware*; the interpreter is an emulated **x86-64** build, so
+> these are not native measurements and are inflated. The 12.7 h / 25.3 h
+> projections are laptop figures at a nominal treedepth of 5. Restated for the
+> cluster, and re-measured on the fixed graph, in [DECISIONS.md](DECISIONS.md)
+> §13. The *ratio* — the finding this section is actually about — is unaffected,
+> because it is a property of the graph rather than of the machine.
+
 **Measured and then profiled, 2026-08-28.** `scripts/18_model_equivalence_and_timing.py`
 and `scripts/19_gradient_profile.py`, 5113 steps, ARM64, NumbaLinker.
 

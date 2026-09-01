@@ -361,13 +361,14 @@ def build_forward_graph(
     initial = [
         theta[f"c_{name}_0"] for name in ("lab", "fol", "roo", "woo", "lit", "som")
     ]
-    outputs, _updates = pytensor.scan(
+    outputs = pytensor.scan(
         fn=step,
         sequences=sequences,
         outputs_info=[*initial, None, None, None, None],
         non_sequences=non_sequences,
         strict=True,
         name="dalec2",
+        return_updates=False,
     )
     pools = pt.stack(outputs[: len(POOL_NAMES)], axis=1)
     gpp, ra, rh, nee = outputs[len(POOL_NAMES) :]
