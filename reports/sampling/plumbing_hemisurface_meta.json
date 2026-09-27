@@ -10,8 +10,12 @@
   "wall_clock_s": 1217.1893137000006,
   "divergences": 0,
   "max_treedepth_hits": 0,
-  "worst_r_hat": 1.0,
-  "lowest_ess_bulk": 230.0,
+  "worst_r_hat": 1.0199024529777467,
+  "lowest_ess_bulk": 228.05453288454729,
+  "r_hat_above_1_01": [
+    "d_onset",
+    "c_lit_0"
+  ],
   "n_days": 730,
   "n_assimilated": 622
 }
