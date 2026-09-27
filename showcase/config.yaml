@@ -1,0 +1,63 @@
+# Settings for the showcase. Every model and sampler value is copied from the
+# real pipeline: config/default.yaml, jobs/calibrate.sbatch and
+# scripts/04_calibrate.py. Paths are relative to the repository root and use
+# forward slashes, so this file works unchanged on a laptop and on Roihu.
+
+seed: 20260809
+
+site:
+  code: FI-Hyy
+  latitude_deg: 61.8474
+
+acm:
+  frost_threshold_degc: -2.0    # no photosynthesis below this daily mean temperature
+
+paths:
+  fluxnet_file: data/raw/FLX_FI-Hyy_FLUXNET2015_FULLSET_DD_1996-2014_1-4.csv
+  # Daily Tmax and Tmin, derived from the half-hourly file by scripts/01b_derive_tminmax.py
+  extremes_file: data/processed/fi_hyy_tminmax.csv
+  outputs_dir: showcase/outputs
+  figures_dir: showcase/outputs/figures
+  twin_posterior: showcase/outputs/twin_posterior.nc
+
+data:
+  qc_threshold: 0.75    # days with NEE_VUT_REF_QC below this stay out of the likelihood
+
+years:                          # inclusive; 1996 is excluded (CO2 driver gap)
+  calibration: [1997, 2010]
+  prediction: [2011, 2014]      # held out: the evaluation window
+
+# Hemisurface is the default. The projected convention is run as a sensitivity
+# check: python showcase/run_calibration.py --convention projected
+lai_convention: hemisurface
+
+# As in the real run. target_accept and max_treedepth are not set: the real run
+# leaves them at PyMC's defaults.
+sampler:
+  chains: 4
+  tune: 1000
+  draws: 1000
+  cores: 4
+
+results:
+  n_forward_draws: 100          # posterior draws re-run over 1997-2014 for the bands
+  interval_prob: 0.94
+  # Every sampled scalar except d_fall, which is inert as transcribed: its flat
+  # posterior is not a finding (DECISIONS.md section 2).
+  main_parameters:
+    - f_auto
+    - theta_roo
+    - theta_woo
+    - theta_min
+    - temperature_exponent
+    - d_onset
+    - cr_onset
+    - cr_fall
+    - c_lf
+    - lma
+    - ceff
+    - rh_annual
+    - f_som
+    - theta_lit
+    - theta_som
+  rank_plot_parameters: [ceff, f_auto, lma, rh_annual]
