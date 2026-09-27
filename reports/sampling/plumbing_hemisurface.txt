@@ -1,20 +1,10 @@
 ==========================================================================
   PLUMBING RUN -- machinery check, NOT a result
 ==========================================================================
+  REGENERATED from plumbing_hemisurface.nc; sampling was not re-run.
   block        1997-1998, 730 days, 622 assimilable
   convention   hemisurface
   sampling     2 chains, 200 tune, 200 draws
-g++ not available, if using conda: `conda install gxx`
-  machine      ARM64, NumbaLinker
-  model built in 1.6 s; initial logp -28,182.3 (finite)
-Initializing NUTS using jitter+adapt_diag...
-Multiprocess sampling (2 chains in 2 jobs)
-NUTS: [f_auto, theta_roo, theta_woo, theta_min, temperature_exponent, d_onset, cr_onset, d_fall, cr_fall, c_lf, lma, ceff, rh_annual, f_som, theta_lit, theta_som, allocation_weights]
-g++ not available, if using conda: `conda install gxx`
-g++ not available, if using conda: `conda install gxx`
-Sampling 2 chains for 200 tune and 200 draw iterations (400 + 400 draws total) took 979 seconds.
-We recommend running at least 4 chains for robust computation of convergence diagnostics
-The rhat statistic is larger than 1.01 for some parameters. This indicates problems during sampling. See https://arxiv.org/abs/1903.08008 for details
 
 ==========================================================================
   Sampling
@@ -31,43 +21,44 @@ The rhat statistic is larger than 1.01 for some parameters. This indicates probl
   Convergence, every sampled variable
 ==========================================================================
   variable                         mean    r_hat   ess_bulk   ess_tail
-  f_auto                           0.66    1.000        290        280
-  theta_roo                      0.0097    1.000        290        170
-  theta_woo                     0.00076    1.000        310        320
-  theta_min                      0.0099    1.000        280        110
-  temperature_exponent            0.059    1.000        400        250
-  d_onset                           120    1.000        550        310
-  cr_onset                           19    1.000        390        300
-  d_fall                            180    1.000        610        280
-  cr_fall                            29    1.000        530        280
-  c_lf                             0.33    1.000        460        200
-  lma                               190    1.000        320        310
-  ceff                               20    1.000        420        230
-  rh_annual                         360    1.000        410        210
-  f_som                             0.5    1.000        230        160
-  theta_lit                      0.0027    1.000        230        160
-  theta_som                     0.00011    1.000        440        280
-  allocation_weights[0]            0.93    1.000        340        320
-  allocation_weights[1]          0.0058    1.000        360        290
-  allocation_weights[2]           0.016    1.000        320        290
-  allocation_weights[3]           0.046    1.000        450        330
-  f_lab                            0.31    1.000        380        350
-  f_fol                          0.0019    1.000        360        290
-  f_roo                          0.0053    1.000        320        290
-  f_woo                           0.015    1.000        440        310
-  rh_ref                           0.68    1.000        470        330
-  decomposition_multiplier          1.4    1.000        400        250
-  c_lit_0                           130    1.000        490        280
-  c_som_0                          3100    1.000        440        320
-  c_fol_0                           460    1.000        460        200
-  c_lab_0                           150    1.000        360        290
-  c_roo_0                            25    1.000        290        170
-  c_woo_0                          6200    1.000        440        220
-  c_fol_mean                        600    1.000        310        270
-  gpp_annual                       1600    1.000        310        250
-  nee_annual                       -230    1.000        440        320
+  f_auto                         0.6641   1.0012      287.9      284.6
+  theta_roo                    0.009709   0.9972      294.6      166.0
+  theta_woo                   0.0007612   0.9976      313.8      320.3
+  theta_min                    0.009943   1.0024      275.6      114.3
+  temperature_exponent          0.05889   1.0000      403.5      248.4
+  d_onset                         122.6   1.0199      553.3      307.2
+  cr_onset                         19.2   1.0001      390.3      296.6
+  d_fall                          180.8   1.0020      607.1      276.5
+  cr_fall                         29.16   1.0040      528.1      280.1
+  c_lf                           0.3332   1.0073      458.4      198.7
+  lma                             190.7   0.9976      318.8      311.7
+  ceff                            19.99   0.9998      420.2      227.8
+  rh_annual                       356.7   1.0052      411.0      212.2
+  f_som                          0.5009   1.0030      228.7      157.5
+  theta_lit                    0.002702   0.9976      228.1      161.6
+  theta_som                   0.0001096   1.0069      443.6      281.7
+  allocation_weights[0]          0.9329   1.0035      339.2      321.7
+  allocation_weights[1]        0.005804   0.9975      358.6      291.2
+  allocation_weights[2]         0.01564   1.0002      323.1      286.2
+  allocation_weights[3]         0.04568   1.0067      449.8      332.5
+  f_lab                          0.3134   0.9986      375.4      350.0
+  f_fol                         0.00195   0.9979      358.4      291.2
+  f_roo                        0.005254   1.0005      321.6      286.2
+  f_woo                         0.01535   1.0067      444.9      306.9
+  rh_ref                         0.6772   1.0061      465.4      330.5
+  decomposition_multiplier        1.442   1.0000      403.5      248.4
+  c_lit_0                         125.1   1.0138      489.8      279.3
+  c_som_0                          3098   1.0007      443.7      315.5
+  c_fol_0                         462.1   1.0073      458.4      198.7
+  c_lab_0                           153   0.9979      361.0      285.7
+  c_roo_0                          25.4   0.9972      294.6      166.0
+  c_woo_0                          6159   0.9987      440.2      219.4
+  c_fol_mean                      603.8   0.9975      309.3      273.6
+  gpp_annual                       1623   1.0015      310.4      248.2
+  nee_annual                     -226.7   1.0027      435.3      316.3
 
-  worst r_hat 1.000   lowest ess_bulk 230
+  worst r_hat 1.0199   lowest ess_bulk 228.1
+  r_hat above 1.01 on 2 variable(s): d_onset, c_lit_0
 
 ==========================================================================
   Prediction 1: do divergences cluster at particular c_lf values?
@@ -80,9 +71,9 @@ The rhat statistic is larger than 1.01 for some parameters. This indicates probl
 ==========================================================================
   Prediction 2: chains agree on NEE, disagree on c_fol?
 ==========================================================================
-  nee_annual   chain means    -226.49     -226.92   |diff|      0.43   pooled sd      1.93   r_hat 1.000
-  c_fol_mean   chain means     603.94      603.65   |diff|      0.29   pooled sd      2.97   r_hat 1.000
-  gpp_annual   chain means    1623.51     1623.15   |diff|      0.37   pooled sd      8.87   r_hat 1.000
+  nee_annual   chain means    -226.49     -226.92   |diff|      0.43   pooled sd      1.93   r_hat 1.0027
+  c_fol_mean   chain means     603.94      603.65   |diff|      0.29   pooled sd      2.97   r_hat 0.9975
+  gpp_annual   chain means    1623.51     1623.15   |diff|      0.37   pooled sd      8.87   r_hat 1.0015
 
   Read: a low r_hat on nee_annual beside a high one on c_fol_mean is
   the predicted signature. At 200 draws neither is conclusive.
