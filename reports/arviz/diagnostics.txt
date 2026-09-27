@@ -1,0 +1,82 @@
+arviz 1.2.0   |   .\results\calibration_hemisurface.nc
+4 chains x 1000 draws
+groups: ('/', '/posterior', '/sample_stats', '/observed_data')
+log_likelihood stored (needed for WAIC/LOO): False
+
+=== pooled summary, worst 15 by r-hat ===
+                           mean     sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+f_auto                     0.69   0.02     0.66      0.7         7        10  1.53     0.009   0.0052
+allocation_weights[0]      0.56   0.07     0.43      0.6         7        10  1.53     0.037    0.021
+gpp_annual                2e+03  2e+01     1600     1700         7        10  1.53       7.9        5
+c_fol_mean                6e+02     12      570      610         7        10  1.53         6      3.7
+c_woo_0                    6149  3e+01     6100     6200         7        10  1.53       3.3       15
+c_roo_0                      36  3e+01       25       51         7        11  1.53       3.3       15
+c_lit_0                   6e+02  2e+02      260      710         7        10  1.53        92       53
+decomposition_multiplier   1.29   0.05      1.3      1.4         7        10  1.53     0.026    0.015
+rh_ref                     0.79   0.03     0.73     0.81         7        10  1.53     0.015   0.0087
+f_woo                      0.06   0.02    0.021     0.09         7        10  1.53     0.012   0.0062
+f_roo                      0.07   0.06    0.029     0.17         7        10  1.53     0.028    0.016
+f_lab                      0.17  0.015     0.15     0.18         7        10  1.53    0.0072   0.0042
+allocation_weights[3]      0.21   0.09    0.061      0.3         7        10  1.53      0.04    0.022
+allocation_weights[2]       0.2   0.16    0.098     0.51         7        10  1.53     0.077    0.044
+theta_roo                 0.008  0.002   0.0049     0.01         7        11  1.53   0.00061  0.00053
+
+=== lowest bulk ESS within each chain considered alone ===
+chain
+0    241
+1    328
+2    348
+3    156
+
+=== chains grouped by mean log-posterior ===
+  chain 0: mode 1   mean lp = -67018.9
+  chain 1: mode 1   mean lp = -67018.8
+  chain 2: mode 0   mean lp = -63063.7
+  chain 3: mode 1   mean lp = -67019.1
+
+=== az.diagnose() ===
+Divergences
+1 of 4000 (0.03%) transitions ended with a divergence.
+These divergent transitions indicate that HMC is not fully able to explore the posterior distribution.
+Try increasing adapt delta closer to 1.
+If this doesn't remove all divergences, try to reparameterize the model.
+
+Tree depth
+Treedepth satisfactory for all transitions.
+
+E-BFMI
+E-BFMI satisfactory for all chains.
+
+ESS
+The following parameters has fewer than 400 effective samples:
+  f_auto, theta_roo, theta_min, temperature_exponent, d_onset, cr_fall, lma, ceff, f_som, theta_lit, theta_som, allocation_weights, f_lab, f_roo, f_woo, rh_ref, decomposition_multiplier, c_lit_0, c_som_0, c_roo_0, c_woo_0, c_fol_mean, gpp_annual, nee_annual
+This suggests that the sampler may not have fully explored the posterior distribution for this parameter.
+Consider reparameterizing the model or increasing the number of samples.
+
+R-hat
+The following parameters has R-hat values greater than 1.01:
+  f_auto, theta_roo, theta_min, temperature_exponent, d_onset, cr_fall, lma, ceff, f_som, theta_lit, theta_som, allocation_weights, f_lab, f_fol, f_roo, f_woo, rh_ref, decomposition_multiplier, c_lit_0, c_som_0, c_lab_0, c_roo_0, c_woo_0, c_fol_mean, gpp_annual, nee_annual
+Such high values indicate incomplete mixing and biased estimation.
+You should consider regularizing your model with additional prior information or a more effective parameterization.
+
+BFMI per chain: [0.916 0.923 0.947 0.925]  (below 0.3 is a warning)
+
+worst-mixing variables plotted: ['allocation_weights', 'c_fol_mean', 'c_roo_0', 'c_woo_0', 'f_auto', 'gpp_annual']
+wrote fig23_forest.pdf / .png
+wrote fig24_convergence.pdf / .png
+wrote fig25_rank.pdf / .png
+wrote fig26_trace.pdf / .png
+wrote fig27_energy.pdf / .png
+
+=== 10 strongest posterior correlations (candidate equifinality ridges) ===
+  |r| = 1.000   c_lf <-> c_fol_0
+  |r| = 1.000   c_roo_0 <-> c_woo_0
+  |r| = 1.000   temperature_exponent <-> decomposition_multiplier
+  |r| = 1.000   allocation_weights[0] <-> f_lab
+  |r| = 1.000   temperature_exponent <-> rh_ref
+  |r| = 1.000   rh_ref <-> decomposition_multiplier
+  |r| = 1.000   allocation_weights[3] <-> f_woo
+  |r| = 1.000   cr_fall <-> allocation_weights[0]
+  |r| = 1.000   f_auto <-> allocation_weights[0]
+  |r| = 1.000   cr_fall <-> f_lab
+wrote fig28_pair.pdf / .png
