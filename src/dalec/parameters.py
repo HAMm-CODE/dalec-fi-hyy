@@ -1034,6 +1034,10 @@ def canopy_bounds(
     lower, upper = leaf_mass_per_area_bounds(convention=convention)
     return {
         "lma": (float(round(lower)), float(round(upper))),
+        # c_lf U(0.2, 0.333). Southern Finland Scots pine needle biomass turnover
+        # is about 0.21 per year (Trees, doi:10.1007/s00468-004-0381-4); Kolari
+        # et al. (2009) support about 0.25. Both lie inside the range. Source to
+        # be verified by Hamza.
         "c_lf": (1.0 / high_life, 1.0 / low_life),
         "ceff": REFLEX_CEFF_BOUNDS,
     }

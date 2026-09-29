@@ -112,6 +112,17 @@ then `c_lf × Cf`, the same relation DALEC2's starting foliage
 `c_fol_0 = litterfall / c_lf` rests on. A cohort-based reading,
 `t5 = -ln(1 - c_lf) / 365.25`, would give a rate 11–22% faster; it was not used.
 
+**Source for the `c_lf` range.** Southern Finland Scots pine needle biomass
+turnover is about 0.21 per year (Trees, doi:10.1007/s00468-004-0381-4); Kolari
+et al. (2009) support about 0.25. Both lie inside U(0.2, 0.333). Source to be
+verified by Hamza.
+
+The DALEC2 posterior does not agree with them: in the 1997–2010 hemisurface
+calibration, `c_lf` sits at the 0.333 upper bound (posterior mean 0.3333 in
+every chain), above both measured values. The data are pushing leaf turnover
+faster than the site's own measurements allow, which is a prior range
+truncating the answer rather than an estimate of `c_lf`.
+
 ### And allocation is a Dirichlet, as locked in DECISIONS §1
 
 Williams' `t3` and `t4` are the fractions of NPP going to foliage and to fine

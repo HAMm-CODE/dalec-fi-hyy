@@ -300,6 +300,10 @@ def build_evergreen_graph(
 
     # t5, the foliage turnover rate (departure 2). Time-invariant, so computed
     # once here and passed in as a non-sequence like everything else.
+    # c_lf keeps its DALEC2 prior U(0.2, 0.333). Southern Finland Scots pine
+    # needle biomass turnover is about 0.21 per year (Trees,
+    # doi:10.1007/s00468-004-0381-4); Kolari et al. (2009) support about 0.25.
+    # Both lie inside the range. Source to be verified by Hamza.
     foliage_turnover = theta["c_lf"] / DAYS_PER_YEAR
 
     step_parameters = (
