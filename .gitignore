@@ -11,6 +11,11 @@ data/processed/*
 results/*
 !results/.gitkeep
 
+# --- References -------------------------------------------------------------
+# Published papers kept locally to check equations against. Copyrighted, so
+# not redistributed through the repository.
+references/*.pdf
+
 # --- Python -----------------------------------------------------------------
 __pycache__/
 *.py[cod]

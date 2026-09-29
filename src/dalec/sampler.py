@@ -8,6 +8,12 @@ them and to make the connection auditable:
     dalec.model.build_forward_graph  -> DALEC2, equal to the numpy model to 1e-14
     dalec.likelihood.build_likelihood -> Gaussian on RANDUNC, masked days excluded
 
+``model_variant`` picks the model structure. ``"dalec2"`` (the default) is the
+path above, unchanged. ``"evergreen"`` swaps the first two for
+:mod:`dalec.model_evergreen` -- Williams et al. (2005), no labile pool and no
+phenology -- and keeps the likelihood, the data and every shared prior, for the
+RQ3 structure comparison (docs/evergreen.md).
+
 The LAI convention is carried through rather than defaulted, because both
 conventions stay live and the calibration is run under each (DECISIONS §10,
 LIMITATIONS §15). :class:`DalecModel` records which one it was built with so a
@@ -29,6 +35,7 @@ from dalec.acm import AcmCoefficients, AcmModel
 from dalec.data_io import SiteData
 from dalec.likelihood import GaussianLikelihood, build_likelihood
 from dalec.model import DalecGraph, build_forward_graph
+from dalec.model_numpy import POOL_NAMES
 from dalec.parameters import DEFAULT_LAI_CONVENTION
 from dalec.priors import DalecPriors, build_priors
 
@@ -37,10 +44,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     import pymc as pm
 
 __all__ = [
+    "DEFAULT_MODEL_VARIANT",
+    "MODEL_VARIANTS",
     "DalecModel",
     "build_model",
     "sample",
 ]
+
+#: Model structures the sampler can build. See docs/evergreen.md.
+MODEL_VARIANTS: tuple[str, ...] = ("dalec2", "evergreen")
+
+#: The structure every locked decision is stated against.
+DEFAULT_MODEL_VARIANT: str = "dalec2"
 
 
 @dataclass(frozen=True)
@@ -57,6 +72,10 @@ class DalecModel:
     convention
         LAI convention this model was built on. Carried because a GPP result is
         not interpretable without it.
+    model_variant
+        Model structure, one of :data:`MODEL_VARIANTS`. For ``"evergreen"``,
+        ``priors`` and ``graph`` are the evergreen counterparts, with the same
+        fields.
     """
 
     model: pm.Model
@@ -64,6 +83,7 @@ class DalecModel:
     graph: DalecGraph
     likelihood: GaussianLikelihood
     convention: str
+    model_variant: str = DEFAULT_MODEL_VARIANT
 
 
 def build_model(
@@ -74,6 +94,7 @@ def build_model(
     frost_threshold_degc: float,
     convention: str = DEFAULT_LAI_CONVENTION,
     track_fluxes: bool = False,
+    model_variant: str = DEFAULT_MODEL_VARIANT,
 ) -> DalecModel:
     """Assemble the full model over one driver block.
 
@@ -89,12 +110,32 @@ def build_model(
         Record GPP and the modelled NEE as deterministics. Off by default: it
         stores one array per draw per flux, which is large and is not needed for
         convergence diagnostics.
+    model_variant
+        ``"dalec2"`` or ``"evergreen"``. Only the priors and the forward graph
+        change; the likelihood and the recorded deterministics are the same.
     """
     import pymc as pm
 
+    if model_variant not in MODEL_VARIANTS:
+        raise ValueError(
+            f"unknown model_variant {model_variant!r}; expected one of {MODEL_VARIANTS}"
+        )
+    if model_variant == "evergreen":
+        from dalec.model_evergreen import (
+            EVERGREEN_FOLIAGE_INDEX,
+            build_evergreen_graph,
+            build_evergreen_priors,
+        )
+
+        prior_builder, graph_builder = build_evergreen_priors, build_evergreen_graph
+        foliage_index = EVERGREEN_FOLIAGE_INDEX
+    else:
+        prior_builder, graph_builder = build_priors, build_forward_graph
+        foliage_index = POOL_NAMES.index("c_fol")
+
     with pm.Model() as model:
-        priors = build_priors(t_air=site_data.t_air, convention=convention)
-        graph = build_forward_graph(
+        priors = prior_builder(t_air=site_data.t_air, convention=convention)
+        graph = graph_builder(
             parameters=priors.parameters,
             doy=site_data.doy.astype(float),
             t_air=site_data.t_air,
@@ -113,7 +154,7 @@ def build_model(
         # Mean foliar carbon is one scalar per draw and is the quantity the
         # diagnostics phase predicted chains would disagree on, so it is
         # recorded unconditionally.
-        pm.Deterministic("c_fol_mean", graph.pools[:, 1].mean())
+        pm.Deterministic("c_fol_mean", graph.pools[:, foliage_index].mean())
         pm.Deterministic("gpp_annual", graph.gpp.mean() * 365.25)
         pm.Deterministic("nee_annual", graph.nee.mean() * 365.25)
 
@@ -123,6 +164,7 @@ def build_model(
         graph=graph,
         likelihood=likelihood,
         convention=convention,
+        model_variant=model_variant,
     )
 
 
@@ -132,6 +174,7 @@ def model_from_config(
     *,
     convention: str = DEFAULT_LAI_CONVENTION,
     track_fluxes: bool = False,
+    model_variant: str = DEFAULT_MODEL_VARIANT,
 ) -> DalecModel:
     """Build the model from a loaded configuration and a prepared block."""
     from dalec.acm import acm_from_config
@@ -146,6 +189,7 @@ def model_from_config(
         frost_threshold_degc=acm.frost_threshold_degc,
         convention=convention,
         track_fluxes=track_fluxes,
+        model_variant=model_variant,
     )
 
 

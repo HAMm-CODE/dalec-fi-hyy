@@ -116,6 +116,15 @@ morris:
   # calibration block when null.
   years: null
 
+# --- Model structure ---------------------------------------------------------
+# dalec2     Bloom & Williams (2015): the model every locked decision is stated
+#            against. The default, and what scripts/04_calibrate.py runs unless
+#            told otherwise.
+# evergreen  Williams et al. (2005): no labile pool and no leaf phenology, for
+#            the RQ3 structure comparison. See docs/evergreen.md.
+# scripts/04_calibrate.py --model-variant overrides this per run.
+model_variant: dalec2
+
 # --- Sampler (Phase 6 onwards) -----------------------------------------------
 # NUTS only. No alternative samplers, by design.
 sampler:

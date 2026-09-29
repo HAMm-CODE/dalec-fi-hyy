@@ -35,10 +35,21 @@ reports the *hardware*: on the development laptop it prints ``ARM64`` while the
 interpreter is an emulated x86-64 build, which is how every earlier timing report
 came to carry a misleading header (DECISIONS §13).
 
+The model structure is an argument too
+--------------------------------------
+``--model-variant evergreen`` calibrates the evergreen DALEC of Williams et al.
+(2005) instead of DALEC2, with the same data, likelihood, shared priors and NUTS
+settings, for the RQ3 structure comparison (docs/evergreen.md). The default is
+``model_variant`` in the config, ``dalec2``. Every output file carries both the
+variant and the convention, ``calibration_<variant>_<convention>.*``, and the
+script refuses to start if any of them already exists, so parallel jobs and
+reruns never overwrite a finished trace.
+
 Usage
 -----
     python scripts/04_calibrate.py
     python scripts/04_calibrate.py --convention projected
+    python scripts/04_calibrate.py --model-variant evergreen
 """
 
 from __future__ import annotations
@@ -75,7 +86,13 @@ from dalec.parameters import (  # noqa: E402
     DalecParameters,
     prior_bounds,
 )
-from dalec.sampler import initial_point_is_finite, model_from_config, sample  # noqa: E402
+from dalec.sampler import (  # noqa: E402
+    DEFAULT_MODEL_VARIANT,
+    MODEL_VARIANTS,
+    initial_point_is_finite,
+    model_from_config,
+    sample,
+)
 
 RESULTS_DIR = Path("results")
 
@@ -105,6 +122,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_LAI_CONVENTION,
         choices=sorted(LAI_CONVENTIONS),
         help="LAI convention. The projected run is this script with this flag.",
+    )
+    parser.add_argument(
+        "--model-variant",
+        default=None,
+        choices=MODEL_VARIANTS,
+        help="Model structure. Defaults to model_variant in the config, else dalec2.",
     )
     parser.add_argument("--chains", type=int, default=4)
     parser.add_argument("--tune", type=int, default=1000)
@@ -184,7 +207,7 @@ def print_provenance(out, config, block) -> dict[str, object]:
     }
 
 
-def time_graph(out, config, block, acm) -> dict[str, float]:
+def time_graph(out, config, block, acm, model_variant) -> dict[str, float]:
     """One forward pass and one gradient at the real step count.
 
     Compiles a standalone copy of the forward graph over a plain ``dvector`` of
@@ -194,12 +217,19 @@ def time_graph(out, config, block, acm) -> dict[str, float]:
     import pytensor
     import pytensor.tensor as pt
 
+    if model_variant == "evergreen":
+        from dalec.model_evergreen import EVERGREEN_PARAMETER_NAMES, build_evergreen_graph
+
+        names, graph_builder = EVERGREEN_PARAMETER_NAMES, build_evergreen_graph
+    else:
+        names, graph_builder = PARAMETER_NAMES, build_forward_graph
+
     theta = pt.dvector("theta")
     named = dict(
-        zip(PARAMETER_NAMES, [theta[i] for i in range(len(PARAMETER_NAMES))],
+        zip(names, [theta[i] for i in range(len(names))],
             strict=True)
     )
-    graph = build_forward_graph(
+    graph = graph_builder(
         parameters=named,
         doy=block.doy.astype(float),
         t_air=block.t_air,
@@ -224,7 +254,7 @@ def time_graph(out, config, block, acm) -> dict[str, float]:
     compile_s = time.perf_counter() - compile_start
 
     theta0 = np.array(
-        [reference_parameters().to_dict()[name] for name in PARAMETER_NAMES]
+        [reference_parameters().to_dict()[name] for name in names]
     )
 
     def measure(function) -> np.ndarray:
@@ -445,6 +475,21 @@ def main() -> int:
     out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
     cores = args.cores if args.cores is not None else args.chains
+    variant = args.model_variant or str(config.get("model_variant", DEFAULT_MODEL_VARIANT))
+    if variant not in MODEL_VARIANTS:
+        raise SystemExit(f"model_variant {variant!r} is not one of {MODEL_VARIANTS}")
+
+    # Every output carries the variant and the convention, and nothing that
+    # already exists is overwritten: a finished trace costs hours to replace.
+    stem = f"calibration_{variant}_{args.convention}"
+    outputs = [out_dir / f"{stem}{suffix}"
+               for suffix in (".nc", "_summary.csv", "_meta.json", ".log")]
+    existing = [str(path) for path in outputs if path.exists()]
+    if existing:
+        raise SystemExit(
+            "refusing to overwrite existing results: " + ", ".join(existing)
+            + ". Move them aside or pass a different --outdir."
+        )
 
     lines: list[str] = []
 
@@ -464,10 +509,11 @@ def main() -> int:
 
     bar = "=" * 74
     out(bar)
-    out("  DALEC2 CALIBRATION -- FI-Hyy, NEE_VUT_REF only")
+    out(f"  CALIBRATION ({variant}) -- FI-Hyy, NEE_VUT_REF only")
     out(bar)
     out(f"  block                   {calibration[0]}-{calibration[1]}, "
         f"{block.n_days} days, {block.n_assimilated} assimilable")
+    out(f"  model variant           {variant}")
     out(f"  convention              {args.convention}")
     out(f"  sampling                {args.chains} chains, {args.tune} tune, "
         f"{args.draws} draws, {cores} cores")
@@ -487,14 +533,16 @@ def main() -> int:
         out(bar)
         out("  Graph timing at the real step count")
         out(bar)
-        timing = time_graph(out, config, block, acm)
+        timing = time_graph(out, config, block, acm, variant)
 
     out("")
     out(bar)
     out("  Model")
     out(bar)
     build_start = time.perf_counter()
-    dalec = model_from_config(config, block, convention=args.convention)
+    dalec = model_from_config(
+        config, block, convention=args.convention, model_variant=variant
+    )
     build_s = time.perf_counter() - build_start
     finite, logp = initial_point_is_finite(dalec)
     out(f"  built in                {build_s:.1f} s")
@@ -517,8 +565,9 @@ def main() -> int:
     wall_s = time.perf_counter() - start
 
     # -- trace out first, before any analysis can fail -----------------------
-    trace_path = out_dir / f"calibration_{args.convention}.nc"
+    trace_path = out_dir / f"{stem}.nc"
     idata.attrs["seed"] = seed
+    idata.attrs["model_variant"] = variant
     idata.attrs["convention"] = args.convention
     idata.attrs["calibration_years"] = list(calibration)
     idata.attrs["n_days"] = int(block.n_days)
@@ -597,9 +646,10 @@ def main() -> int:
     out(bar)
     rq3 = report_rq3(out, fluxes)
 
-    summary_path = out_dir / f"calibration_{args.convention}_summary.csv"
+    summary_path = out_dir / f"{stem}_summary.csv"
     summary.to_csv(summary_path)
     meta = {
+        "model_variant": variant,
         "convention": args.convention,
         "block": list(calibration),
         "n_days": int(block.n_days),
@@ -624,7 +674,7 @@ def main() -> int:
         "fluxes": fluxes,
         "rq3": rq3,
     }
-    (out_dir / f"calibration_{args.convention}_meta.json").write_text(
+    (out_dir / f"{stem}_meta.json").write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
     )
 
@@ -634,9 +684,9 @@ def main() -> int:
     out(bar)
     out(f"  trace     {trace_path}")
     out(f"  summary   {summary_path}")
-    out("  meta      {}".format(out_dir / f"calibration_{args.convention}_meta.json"))
+    out("  meta      {}".format(out_dir / f"{stem}_meta.json"))
 
-    log_path = out_dir / f"calibration_{args.convention}.log"
+    log_path = out_dir / f"{stem}.log"
     log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"  log       {log_path}", flush=True)
     return 0
