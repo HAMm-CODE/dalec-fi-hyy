@@ -89,7 +89,7 @@ python scripts/04_calibrate.py \
 
 echo
 echo "=== outputs ==="
-echo "trace    results/calibration_${CONVENTION}.nc"
-echo "summary  results/calibration_${CONVENTION}_summary.csv"
-echo "meta     results/calibration_${CONVENTION}_meta.json"
+echo "trace    results/calibration_dalec2_${CONVENTION}.nc"
+echo "summary  results/calibration_dalec2_${CONVENTION}_summary.csv"
+echo "meta     results/calibration_dalec2_${CONVENTION}_meta.json"
 echo "log      ${LOG}"
