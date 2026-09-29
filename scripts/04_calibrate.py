@@ -605,9 +605,7 @@ def main() -> int:
             int(stats["diverging"].values[chain].sum()),
         ))
 
-    # round_to="none" is the only value that disables rounding. Python None falls
-    # through to the default two-significant-figure display, which reported the
-    # plumbing run's worst r_hat of 1.0199 as "1.000" (FINDINGS_sampling.md).
+    # round_to=None still rounds to 2 s.f. (r_hat 1.0199 showed as 1.000); only "none" does not.
     summary = az.summary(idata, round_to="none")
     out("")
     out(bar)
